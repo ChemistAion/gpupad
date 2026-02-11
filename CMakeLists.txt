@@ -282,7 +282,10 @@ endif()
 find_package(glslang CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE glslang::glslang
     glslang::glslang-default-resource-limits
-    glslang::SPVRemapper glslang::SPIRV)
+    glslang::SPIRV)
+if(TARGET glslang::SPVRemapper)
+    target_link_libraries(${PROJECT_NAME} PRIVATE glslang::SPVRemapper)
+endif()
 
 # link SPIRV-Cross
 find_package(spirv_cross_core CONFIG REQUIRED)
