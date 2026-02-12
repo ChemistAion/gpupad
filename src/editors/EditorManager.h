@@ -18,6 +18,7 @@ class TextureEditorToolBar;
 class BinaryEditorToolBar;
 class SourceEditorToolBar;
 class QmlView;
+class SlidersEditor;
 using ScriptEnginePtr = std::shared_ptr<class ScriptEngine>;
 
 class EditorManager final : public DockWindow
@@ -41,6 +42,7 @@ public:
     TextureEditor *openTextureEditor(const QString &fileName);
     QmlView *openQmlView(const QString &fileName,
         const ScriptEnginePtr &enginePtr = {});
+    SlidersEditor *openSlidersEditor();
     void setAutoRaise(bool raise) { mAutoRaise = raise; }
 
     IEditor *getEditor(const QString &fileName);
@@ -48,6 +50,7 @@ public:
     BinaryEditor *getBinaryEditor(const QString &fileName);
     TextureEditor *getTextureEditor(const QString &fileName);
     QmlView *getQmlView(const QString &fileName);
+    SlidersEditor *getSlidersEditor() const { return mSlidersEditor; }
     QStringList getSourceFileNames() const;
     QStringList getBinaryFileNames() const;
     QStringList getImageFileNames() const;
@@ -117,6 +120,7 @@ private:
     QList<BinaryEditor *> mBinaryEditors;
     QList<TextureEditor *> mTextureEditors;
     QList<QmlView *> mQmlViews;
+    SlidersEditor *mSlidersEditor{};
     std::map<QDockWidget *, IEditor *> mDocks;
     std::map<int, QDockWidget *> mLastFocusedTabifyGroupDock;
     QDockWidget *mCurrentDock{};

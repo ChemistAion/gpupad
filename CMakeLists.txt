@@ -98,6 +98,7 @@ set(SOURCES
   src/editors/DockWindow.cpp
   src/editors/DockTitle.cpp
   src/editors/EditorManager.cpp
+  src/editors/sliders/SlidersEditor.cpp
   src/editors/binary/BinaryEditor.cpp
   src/editors/binary/BinaryEditorToolBar.cpp
   src/editors/binary/BinaryEditorToolBar.ui

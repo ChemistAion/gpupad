@@ -89,6 +89,7 @@ BindingProperties::BindingProperties(PropertiesEditor *propertiesEditor)
     fillComboBox<Binding::Editor>(mUi->editor,
         {
             { "Expression", Binding::Editor::Expression },
+            { "Slider", Binding::Editor::Slider },
             { "2 Expressions", Binding::Editor::Expression2 },
             { "3 Expressions", Binding::Editor::Expression3 },
             { "4 Expressions", Binding::Editor::Expression4 },

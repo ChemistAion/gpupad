@@ -8,6 +8,7 @@
 #include "qml/QmlView.h"
 #include "source/SourceEditor.h"
 #include "source/SourceEditorToolBar.h"
+#include "editors/sliders/SlidersEditor.h"
 #include "texture/TextureEditor.h"
 #include "texture/TextureEditorToolBar.h"
 #include "texture/TextureInfoBar.h"
@@ -263,6 +264,16 @@ BinaryEditor *EditorManager::openNewBinaryEditor(const QString &fileName)
     addBinaryEditor(editor);
     autoRaise(editor);
     return editor;
+}
+
+SlidersEditor *EditorManager::openSlidersEditor()
+{
+    if (!mSlidersEditor) {
+        mSlidersEditor = new SlidersEditor(this);
+        createDock(mSlidersEditor, mSlidersEditor);
+    }
+    autoRaise(mSlidersEditor);
+    return mSlidersEditor;
 }
 
 TextureEditor *EditorManager::openNewTextureEditor(const QString &fileName)
@@ -764,6 +775,8 @@ void EditorManager::closeDock(QDockWidget *dock)
     mBinaryEditors.removeAll(static_cast<BinaryEditor *>(editor));
     mTextureEditors.removeAll(static_cast<TextureEditor *>(editor));
     mQmlViews.removeAll(static_cast<QmlView *>(editor));
+    if (editor == mSlidersEditor)
+        mSlidersEditor = nullptr;
 
     mDocks.erase(dock);
 

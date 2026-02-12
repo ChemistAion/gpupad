@@ -13,6 +13,7 @@
 #include "WindowTitle.h"
 #include "editors/EditorManager.h"
 #include "editors/IEditor.h"
+#include "editors/sliders/SlidersEditor.h"
 #include "getEventPosition.h"
 #include "scripting/CustomActions.h"
 #include "session/SessionEditor.h"
@@ -24,6 +25,7 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDockWidget>
+#include <QItemSelectionModel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
@@ -244,6 +246,8 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::close);
     connect(mUi->actionOpenContainingFolder, &QAction::triggered, this,
         &MainWindow::openContainingFolder);
+    connect(mUi->actionShowSliders, &QAction::triggered, this,
+        &MainWindow::openSlidersEditor);
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,
@@ -258,6 +262,9 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::openAbout);
     connect(windowFileName, &QAction::changed, this,
         &MainWindow::updateFileActions);
+    connect(mSessionEditor->selectionModel(),
+        &QItemSelectionModel::selectionChanged, this,
+        &MainWindow::updateSlidersSelection);
     connect(mUi->actionFocusNextEditor, &QAction::triggered, this,
         &MainWindow::focusNextEditor);
     connect(mUi->actionFocusPreviousEditor, &QAction::triggered, this,
@@ -1106,6 +1113,23 @@ void MainWindow::updateCustomActionsMenu()
     }
     mUi->menuCustomActions->clear();
     mUi->menuCustomActions->addActions(actions);
+}
+
+void MainWindow::openSlidersEditor()
+{
+    auto editor = mEditorManager.openSlidersEditor();
+    updateSlidersSelection();
+    if (editor)
+        editor->setFocus();
+}
+
+void MainWindow::updateSlidersSelection()
+{
+    auto editor = mEditorManager.getSlidersEditor();
+    if (!editor)
+        return;
+
+    editor->setSelection(mSessionEditor->selectionModel()->selectedRows());
 }
 
 void MainWindow::handleMessageActivated(ItemId itemId, QString fileName,

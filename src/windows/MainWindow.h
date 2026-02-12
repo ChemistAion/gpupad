@@ -85,6 +85,8 @@ private:
     void updateRecentFileActions();
     void openRecentFile();
     void updateCustomActionsMenu();
+    void openSlidersEditor();
+    void updateSlidersSelection();
     void handleMessageActivated(ItemId itemId, QString fileName, int line,
         int column);
     void handleThemeChanging(const Theme &theme);
