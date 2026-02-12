@@ -135,7 +135,9 @@ void SlidersEditor::rebuild()
             continue;
         if (binding->bindingType != Binding::BindingType::Uniform)
             continue;
-        if (binding->editor != Binding::Editor::Slider)
+        if (!binding->sliders)
+            continue;
+        if (binding->editor == Binding::Editor::Color)
             continue;
         if (processed.contains(binding->id))
             continue;

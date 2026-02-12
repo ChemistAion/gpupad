@@ -101,7 +101,6 @@ namespace ItemEnums {
 
     enum BindingEditor {
         Expression,
-        Slider,
         Expression2,
         Expression3,
         Expression4,
