@@ -274,6 +274,23 @@ SlidersEditor *EditorManager::openNewSlidersEditor()
     return editor;
 }
 
+SlidersEditor *EditorManager::openSlidersEditor(const QString &fileName)
+{
+    auto editor = getSlidersEditor(fileName);
+    if (!editor)
+        editor = getSlidersEditor();
+    if (!editor) {
+        editor = new SlidersEditor(this);
+        if (!fileName.isEmpty())
+            editor->setFileName(fileName);
+        addSlidersEditor(editor);
+    } else if (!fileName.isEmpty()) {
+        editor->setFileName(fileName);
+    }
+    autoRaise(editor);
+    return editor;
+}
+
 TextureEditor *EditorManager::openNewTextureEditor(const QString &fileName)
 {
     auto editor =
@@ -294,6 +311,10 @@ void EditorManager::closeUntitledUntouchedSourceEditor()
 
 IEditor *EditorManager::openEditor(const QString &fileName, bool asBinaryFile)
 {
+    if (FileDialog::isUntitled(fileName)
+        && FileDialog::getFileTitle(fileName) == tr("Sliders")) {
+        return openSlidersEditor(fileName);
+    }
     if (!asBinaryFile) {
         if (fileName.endsWith(".qml", Qt::CaseInsensitive)) {
             const auto modifiers = QApplication::queryKeyboardModifiers();
@@ -390,6 +411,9 @@ QmlView *EditorManager::openQmlView(const QString &fileName,
 
 IEditor *EditorManager::getEditor(const QString &fileName)
 {
+    if (!fileName.isEmpty())
+        if (auto editor = getSlidersEditor(fileName))
+            return editor;
     if (auto editor = getSourceEditor(fileName))
         return editor;
     if (auto editor = getBinaryEditor(fileName))
@@ -429,9 +453,15 @@ QmlView *EditorManager::getQmlView(const QString &fileName)
     return nullptr;
 }
 
-SlidersEditor *EditorManager::getSlidersEditor() const
+SlidersEditor *EditorManager::getSlidersEditor(const QString &fileName)
 {
-    return (mSlidersEditors.isEmpty() ? nullptr : mSlidersEditors.last());
+    for (SlidersEditor *editor : std::as_const(mSlidersEditors)) {
+        if (!findEditorDock(editor))
+            continue;
+        if (fileName.isEmpty() || editor->fileName() == fileName)
+            return editor;
+    }
+    return nullptr;
 }
 
 QDockWidget *EditorManager::getEditorDock(const IEditor *editor) const

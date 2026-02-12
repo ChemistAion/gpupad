@@ -43,6 +43,7 @@ public:
     QmlView *openQmlView(const QString &fileName,
         const ScriptEnginePtr &enginePtr = {});
     SlidersEditor *openNewSlidersEditor();
+    SlidersEditor *openSlidersEditor(const QString &fileName = {});
     void setAutoRaise(bool raise) { mAutoRaise = raise; }
 
     IEditor *getEditor(const QString &fileName);
@@ -50,7 +51,7 @@ public:
     BinaryEditor *getBinaryEditor(const QString &fileName);
     TextureEditor *getTextureEditor(const QString &fileName);
     QmlView *getQmlView(const QString &fileName);
-    SlidersEditor *getSlidersEditor() const;
+    SlidersEditor *getSlidersEditor(const QString &fileName = {});
     QDockWidget *getEditorDock(const IEditor *editor) const;
     QStringList getSourceFileNames() const;
     QStringList getBinaryFileNames() const;

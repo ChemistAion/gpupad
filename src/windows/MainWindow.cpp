@@ -1141,13 +1141,11 @@ void MainWindow::updateCustomActionsMenu()
 
 void MainWindow::toggleSlidersEditor(bool show)
 {
-    auto editor = mEditorManager.getSlidersEditor();
     if (show) {
-        if (!editor)
-            editor = mEditorManager.openNewSlidersEditor();
+        auto editor = mEditorManager.openSlidersEditor();
         if (auto dock = mEditorManager.getEditorDock(editor)) {
             dock->setVisible(true);
-            dock->raise();
+            mEditorManager.raiseDock(dock);
             if (mSlidersDockVisibilityConnection)
                 disconnect(mSlidersDockVisibilityConnection);
             if (mSlidersDockDestroyedConnection)
@@ -1165,7 +1163,7 @@ void MainWindow::toggleSlidersEditor(bool show)
         updateSlidersSelection();
         if (editor)
             editor->setFocus();
-    } else if (editor) {
+    } else if (auto editor = mEditorManager.getSlidersEditor()) {
         if (auto dock = mEditorManager.getEditorDock(editor))
             dock->setVisible(false);
     }
