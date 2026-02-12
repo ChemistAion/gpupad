@@ -42,7 +42,7 @@ public:
     TextureEditor *openTextureEditor(const QString &fileName);
     QmlView *openQmlView(const QString &fileName,
         const ScriptEnginePtr &enginePtr = {});
-    SlidersEditor *openSlidersEditor();
+    SlidersEditor *openNewSlidersEditor();
     void setAutoRaise(bool raise) { mAutoRaise = raise; }
 
     IEditor *getEditor(const QString &fileName);
@@ -50,7 +50,8 @@ public:
     BinaryEditor *getBinaryEditor(const QString &fileName);
     TextureEditor *getTextureEditor(const QString &fileName);
     QmlView *getQmlView(const QString &fileName);
-    SlidersEditor *getSlidersEditor() const { return mSlidersEditor; }
+    SlidersEditor *getSlidersEditor() const;
+    QDockWidget *getEditorDock(const IEditor *editor) const;
     QStringList getSourceFileNames() const;
     QStringList getBinaryFileNames() const;
     QStringList getImageFileNames() const;
@@ -102,6 +103,7 @@ private:
     void addSourceEditor(SourceEditor *editor);
     void addBinaryEditor(BinaryEditor *editor);
     void addTextureEditor(TextureEditor *editor);
+    void addSlidersEditor(SlidersEditor *editor);
     void setDockWindowTitle(QDockWidget *dock, const QString &fileName);
     void handleEditorFilenameChanged(QDockWidget *dock);
     bool saveDock(QDockWidget *dock);
@@ -120,7 +122,7 @@ private:
     QList<BinaryEditor *> mBinaryEditors;
     QList<TextureEditor *> mTextureEditors;
     QList<QmlView *> mQmlViews;
-    SlidersEditor *mSlidersEditor{};
+    QList<SlidersEditor *> mSlidersEditors;
     std::map<QDockWidget *, IEditor *> mDocks;
     std::map<int, QDockWidget *> mLastFocusedTabifyGroupDock;
     QDockWidget *mCurrentDock{};

@@ -145,7 +145,6 @@
     </widget>
     <addaction name="actionNavigateBackward"/>
     <addaction name="actionNavigateForward"/>
-    <addaction name="actionShowSliders"/>
     <addaction name="separator"/>
     <addaction name="actionLineWrapping"/>
     <addaction name="actionShowWhiteSpace"/>
@@ -216,6 +215,9 @@
    </property>
   </action>
   <action name="actionShowSliders">
+   <property name="icon">
+    <iconset theme="sliders"/>
+   </property>
    <property name="text">
     <string>Show &amp;Sliders</string>
    </property>

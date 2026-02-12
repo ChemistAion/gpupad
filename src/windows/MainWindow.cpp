@@ -194,7 +194,10 @@ MainWindow::MainWindow(QWidget *parent)
     action->setText(tr("Show &") + action->text());
     action->setIcon(QIcon::fromTheme("utilities-terminal"));
     mUi->menuView->addAction(action);
+    mUi->menuView->addAction(mUi->actionShowSliders);
     mUi->toolBarMain->insertAction(mUi->actionEvalReset, action);
+    mUi->toolBarMain->insertAction(mUi->actionEvalReset,
+        mUi->actionShowSliders);
     splitDockWidget(editorsDock, dock, Qt::Horizontal);
     auto outputDock = dock;
 
@@ -246,8 +249,9 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::close);
     connect(mUi->actionOpenContainingFolder, &QAction::triggered, this,
         &MainWindow::openContainingFolder);
-    connect(mUi->actionShowSliders, &QAction::triggered, this,
-        &MainWindow::openSlidersEditor);
+    mUi->actionShowSliders->setCheckable(true);
+    connect(mUi->actionShowSliders, &QAction::toggled, this,
+        &MainWindow::toggleSlidersEditor);
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,
@@ -564,6 +568,19 @@ QMenu *MainWindow::createPopupMenu()
         toggleVisibleMenu->addAction(toggleVisible);
     }
 
+    const auto insertAfterAction = [&](QAction *after, QAction *action) {
+        if (!after) {
+            menu->addAction(action);
+            return;
+        }
+        const auto actions = menu->actions();
+        const auto index = actions.indexOf(after);
+        if (index >= 0 && index + 1 < actions.size())
+            menu->insertAction(actions[index + 1], action);
+        else
+            menu->addAction(action);
+    };
+
     const auto firstSeparator = [&]() {
         auto separator = std::add_pointer_t<QAction>{};
         const auto actions = menu->actions();
@@ -577,6 +594,13 @@ QMenu *MainWindow::createPopupMenu()
         }
         return separator;
     }();
+    auto outputAction = std::add_pointer_t<QAction>{};
+    for (auto action : menu->actions())
+        if (action->objectName() == "toggleOutput") {
+            outputAction = action;
+            break;
+        }
+    insertAfterAction(outputAction, mUi->actionShowSliders);
     menu->insertMenu(firstSeparator, toggleVisibleMenu);
     menu->addSeparator();
     menu->addAction(mUi->actionHideMenuBar);
@@ -1115,12 +1139,36 @@ void MainWindow::updateCustomActionsMenu()
     mUi->menuCustomActions->addActions(actions);
 }
 
-void MainWindow::openSlidersEditor()
+void MainWindow::toggleSlidersEditor(bool show)
 {
-    auto editor = mEditorManager.openSlidersEditor();
-    updateSlidersSelection();
-    if (editor)
-        editor->setFocus();
+    auto editor = mEditorManager.getSlidersEditor();
+    if (show) {
+        if (!editor)
+            editor = mEditorManager.openNewSlidersEditor();
+        if (auto dock = mEditorManager.getEditorDock(editor)) {
+            dock->setVisible(true);
+            dock->raise();
+            if (mSlidersDockVisibilityConnection)
+                disconnect(mSlidersDockVisibilityConnection);
+            if (mSlidersDockDestroyedConnection)
+                disconnect(mSlidersDockDestroyedConnection);
+            mSlidersDockVisibilityConnection = connect(dock,
+                &QDockWidget::visibilityChanged, this,
+                [this](bool visible) {
+                    mUi->actionShowSliders->setChecked(visible);
+                });
+            mSlidersDockDestroyedConnection = connect(dock, &QObject::destroyed,
+                this, [this]() {
+                    mUi->actionShowSliders->setChecked(false);
+                });
+        }
+        updateSlidersSelection();
+        if (editor)
+            editor->setFocus();
+    } else if (editor) {
+        if (auto dock = mEditorManager.getEditorDock(editor))
+            dock->setVisible(false);
+    }
 }
 
 void MainWindow::updateSlidersSelection()

@@ -35,6 +35,8 @@
         <file>icons/dark/icons/media-playback-start.svg</file>
         <file>icons/dark/icons/media-seek-forward.svg</file>
         <file>icons/dark/icons/media-skip-forward.svg</file>
+        <file>icons/dark/icons/sliders.svg</file>
+        <file>icons/light/icons/sliders.svg</file>
         <file>icons/light/icons/font-select.svg</file>
         <file>icons/light/icons/process-stop.svg</file>
         <file>icons/light/icons/view-refresh.svg</file>

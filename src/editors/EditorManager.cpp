@@ -266,14 +266,12 @@ BinaryEditor *EditorManager::openNewBinaryEditor(const QString &fileName)
     return editor;
 }
 
-SlidersEditor *EditorManager::openSlidersEditor()
+SlidersEditor *EditorManager::openNewSlidersEditor()
 {
-    if (!mSlidersEditor) {
-        mSlidersEditor = new SlidersEditor(this);
-        createDock(mSlidersEditor, mSlidersEditor);
-    }
-    autoRaise(mSlidersEditor);
-    return mSlidersEditor;
+    auto editor = new SlidersEditor(this);
+    addSlidersEditor(editor);
+    autoRaise(editor);
+    return editor;
 }
 
 TextureEditor *EditorManager::openNewTextureEditor(const QString &fileName)
@@ -429,6 +427,16 @@ QmlView *EditorManager::getQmlView(const QString &fileName)
         if (editor->fileName() == fileName)
             return editor;
     return nullptr;
+}
+
+SlidersEditor *EditorManager::getSlidersEditor() const
+{
+    return (mSlidersEditors.isEmpty() ? nullptr : mSlidersEditors.last());
+}
+
+QDockWidget *EditorManager::getEditorDock(const IEditor *editor) const
+{
+    return findEditorDock(editor);
 }
 
 QStringList EditorManager::getSourceFileNames() const
@@ -685,6 +693,12 @@ void EditorManager::addBinaryEditor(BinaryEditor *editor)
         [this, dock]() { handleEditorFilenameChanged(dock); });
 }
 
+void EditorManager::addSlidersEditor(SlidersEditor *editor)
+{
+    mSlidersEditors.append(editor);
+    createDock(editor, editor);
+}
+
 QDockWidget *EditorManager::findDockToAddTab(int tabifyGroup)
 {
     if (mCurrentDock && currentEditor()->tabifyGroup() == tabifyGroup)
@@ -775,8 +789,7 @@ void EditorManager::closeDock(QDockWidget *dock)
     mBinaryEditors.removeAll(static_cast<BinaryEditor *>(editor));
     mTextureEditors.removeAll(static_cast<TextureEditor *>(editor));
     mQmlViews.removeAll(static_cast<QmlView *>(editor));
-    if (editor == mSlidersEditor)
-        mSlidersEditor = nullptr;
+    mSlidersEditors.removeAll(static_cast<SlidersEditor *>(editor));
 
     mDocks.erase(dock);
 
