@@ -1,18 +1,55 @@
-# Copilot instructions for GPUpad
+# Copilot Instructions (Project-Agnostic)
 
-## Build (CMake)
-For this workstatin env, this will work:
-Remove-Item -Recurse -Force .build
-cmake -B .build -G "Visual Studio 18 2026" -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DCMAKE_PREFIX_PATH="X:/.tools/qt6/6.10.2/msvc2022_64"
-## High-level architecture
-- Qt Widgets app entry in `src/main.cpp`; main window/docking UI lives under `src/windows` and editor views under `src/editors`.
-- Session data is a tree of `Item` types (`src/session/Item.h`) managed by `SessionModel/SessionModelCore`, with undo/redo and per-item IDs.
-- Rendering is split by backend: `RenderSessionBase` selects OpenGL or Vulkan implementations (`src/render/opengl`, `src/render/vulkan`) and runs evaluations against a session copy.
-- JavaScript scripting is handled by `ScriptEngine`/`ScriptSession` (`src/scripting`) which loads `:/scripting/ScriptEngine.js` and exposes `app`/`console` globals.
+These instructions are meant to be reusable across projects. Keep them **short, explicit, and enforceable**.
 
-## Key conventions
-- Use `Singletons` for app-wide services (settings, file cache, session model, renderers, editors).
-- Session item properties are often stored as strings/expressions and evaluated during render/script passes; preserve this pattern when adding new item fields.
-- UI and scripting assets are Qt resources; add files to `src/resources.qrc` and reference via `:/` paths.
-- Rendering backend decisions use `RenderAPI` and `RenderSessionBase::create`; keep OpenGL/Vulkan-specific logic in their respective subfolders.
-- Custom actions are built from `extra/actions/*` CMake subprojects with no shared library prefix.
+## Operating Principles
+- Follow **explicit user instructions** first; do not invent requirements.
+- Stay scoped to the request; avoid side quests.
+- Prefer fixing root causes over patching symptoms.
+- Be minimal: avoid sweeping refactors unless requested.
+- When uncertain, ask **1–2 targeted clarifying questions**, then proceed.
+
+## Communication
+- Be concise, direct, and actionable — perhaps a nerdy, with constructive critique.
+- Before making multi-step changes, state a short plan (goal + next steps).
+- Provide short progress updates during longer work.
+- Summarize outcomes and point to the relevant files/commands.
+
+## Change Management
+- Keep diffs small and reviewable.
+- Don’t reformat unrelated code.
+- Don’t change public APIs, filenames, or directory layouts unless requested.
+- If you introduce new dependencies, explain why and how to install them.
+
+## Verification
+- Prefer the narrowest verification first (lint/typecheck/unit tests for touched areas).
+- If tests/build exist, run them when practical after meaningful changes.
+- Don’t “fix” unrelated test failures; report them separately.
+
+## Persistence & “Durable Memory” (Repo-Based)
+Chat history is not durable. Persist important agreements in the repo.
+
+### Recommended structure (optional)
+- `.agent/DECISIONS.md`: durable agreements/decisions (ADR-lite).
+- `.agent/WORKLOG.md`: lightweight progress log and next steps.
+- `.prompts/INIT.md`: bootstrap context + workflow rules for new chats.
+
+## Git / Branching Workflow (Reusable Pattern)
+- Treat the main branch as **sacred** (e.g., `origin/master` or `origin/main`): do not rewrite it.
+- Create work on dedicated branches; rebase/merge according to the team’s conventions.
+- Do not push to remotes unless explicitly asked.
+
+### Optional playground pattern
+For offside experiments:
+- Use a dedicated `playground#XYZ` branch based on the main branch.
+- Delete/reinitialize the playground branch after experiments.
+
+## Debugging Discipline
+- Reproduce first; collect logs; then change one thing at a time.
+- When chasing IDE/task issues, prefer deterministic CLI repro steps.
+- If you add debug-only settings, keep them isolated and easy to revert.
+
+## Safety Rails
+- Never exfiltrate secrets.
+- Don’t add telemetry, network calls, or logging of sensitive data unless requested.
+- Avoid generating or including copyrighted content not provided by the user.
