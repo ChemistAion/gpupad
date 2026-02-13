@@ -47,6 +47,7 @@ public:
         ShaderIncludePaths,
         BindingType,
         BindingEditor,
+        BindingSliderEnabled,
         BindingValues,
         BindingTextureId,
         BindingBufferId,

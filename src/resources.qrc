@@ -104,5 +104,7 @@
         <file>icons/light/icons/zoom-original.svg</file>
         <file>icons/light/icons/user-bookmarks.svg</file>
         <file>icons/dark/icons/user-bookmarks.svg</file>
+        <file>icons/light/icons/sliders.svg</file>
+        <file>icons/dark/icons/sliders.svg</file>
     </qresource>
 </RCC>

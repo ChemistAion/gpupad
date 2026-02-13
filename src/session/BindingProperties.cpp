@@ -130,6 +130,8 @@ BindingProperties::BindingProperties(PropertiesEditor *propertiesEditor)
         &BindingProperties::updateWidgets);
     connect(mUi->editor, &DataComboBox::currentDataChanged, this,
         &BindingProperties::updateWidgets);
+    connect(mUi->sliderEnabled, &QCheckBox::toggled, this,
+        &BindingProperties::updateWidgets);
     connect(mUi->expressions, &ExpressionMatrix::itemChanged,
         [this]() { setValues(mUi->expressions->values()); });
     connect(mUi->color, &ColorPicker::colorChanged,
@@ -167,6 +169,7 @@ void BindingProperties::addMappings(QDataWidgetMapper &mapper)
 {
     mapper.addMapping(mUi->type, SessionModel::BindingType);
     mapper.addMapping(mUi->editor, SessionModel::BindingEditor);
+    mapper.addMapping(mUi->sliderEnabled, SessionModel::BindingSliderEnabled);
     mapper.addMapping(mUi->texture, SessionModel::BindingTextureId);
     mapper.addMapping(mUi->buffer, SessionModel::BindingBufferId);
     mapper.addMapping(mUi->block, SessionModel::BindingBlockId);
@@ -261,10 +264,13 @@ void BindingProperties::updateWidgets()
     const auto color = (type == Binding::BindingType::Uniform
         && editor == Binding::Editor::Color);
     const auto subroutine = (type == Binding::BindingType::Subroutine);
+    const auto sliderEnabled = mUi->sliderEnabled->isChecked();
 
     mSuspendSetValues = true;
 
     setFormVisibility(mUi->formLayout, mUi->labelEditor, mUi->editor, uniform);
+    setFormVisibility(mUi->formLayout, mUi->labelSlider, mUi->sliderEnabled,
+        uniform && !color);
     setFormVisibility(mUi->formLayout, mUi->labelExpressions, mUi->expressions,
         uniform && !color);
     setFormVisibility(mUi->formLayout, mUi->labelColor, mUi->color, color);
@@ -272,6 +278,9 @@ void BindingProperties::updateWidgets()
     mUi->expressions->setRowCount(expressionRows(editor));
     mUi->color->setColor(valuesToColor(mValues));
     mUi->expressions->setValues(mValues);
+
+    if (color && sliderEnabled)
+        mUi->sliderEnabled->setChecked(false);
 
     setFormVisibility(mUi->formLayout, mUi->labelTexture, mUi->texture,
         image || sampler);
