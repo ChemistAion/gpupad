@@ -1,0 +1,133 @@
+{
+    "id": 2,
+    "items": [
+        {
+            "executeOn": "EveryEvaluation",
+            "fileName": "setup.js",
+            "id": 932,
+            "type": "Script"
+        },
+        {
+            "flipVertically": false,
+            "format": "RGBA8_UNorm",
+            "height": "1548",
+            "id": 70,
+            "name": "TargetTexture",
+            "samples": 1,
+            "target": "Target2D",
+            "type": "Texture",
+            "width": "1239"
+        },
+        {
+            "blendConstant": "#ff000000",
+            "cullMode": "NoCulling",
+            "frontFace": "CCW",
+            "id": 71,
+            "items": [
+                {
+                    "blendAlphaDest": "Zero",
+                    "blendAlphaEq": "Add",
+                    "blendAlphaSource": "One",
+                    "blendColorDest": "Zero",
+                    "blendColorEq": "Add",
+                    "blendColorSource": "One",
+                    "colorWriteMask": 15,
+                    "id": 72,
+                    "level": 0,
+                    "name": "Color",
+                    "textureId": 70,
+                    "type": "Attachment"
+                }
+            ],
+            "logicOperation": "NoLogicOperation",
+            "name": "Target",
+            "polygonMode": "Fill",
+            "type": "Target"
+        },
+        {
+            "bindingType": "Uniform",
+            "editor": "Expression3",
+            "id": 74,
+            "name": "iResolution",
+            "type": "Binding",
+            "values": [
+                "target.viewportSize[0]",
+                "target.viewportSize[1]",
+                "0"
+            ]
+        },
+        {
+            "bindingType": "Uniform",
+            "editor": "Expression",
+            "id": 933,
+            "name": "iFrame",
+            "type": "Binding",
+            "values": [
+                "app.frameIndex"
+            ]
+        },
+        {
+            "bindingType": "Uniform",
+            "editor": "Expression3",
+            "id": 934,
+            "name": "iTest",
+            "sliders": true,
+            "type": "Binding",
+            "values": [
+                "0.593",
+                "0.511",
+                "0.61"
+            ]
+        },
+        {
+            "id": 76,
+            "items": [
+                {
+                    "fileName": "attributeless.vs",
+                    "id": 77,
+                    "language": "GLSL",
+                    "shaderType": "Vertex",
+                    "type": "Shader"
+                },
+                {
+                    "fileName": "shadertoy.fs",
+                    "id": 78,
+                    "language": "GLSL",
+                    "shaderType": "Fragment",
+                    "type": "Shader"
+                },
+                {
+                    "fileName": "image.fs",
+                    "id": 79,
+                    "language": "GLSL",
+                    "shaderType": "Fragment",
+                    "type": "Shader"
+                }
+            ],
+            "name": "Program",
+            "type": "Program"
+        },
+        {
+            "baseInstance": "0",
+            "callType": "Draw",
+            "checked": true,
+            "count": "4",
+            "executeOn": "EveryEvaluation",
+            "first": "0",
+            "id": 80,
+            "instanceCount": "1",
+            "name": "Call",
+            "primitiveType": "TriangleStrip",
+            "programId": 76,
+            "targetId": 71,
+            "type": "Call",
+            "vertexStreamId": 0
+        }
+    ],
+    "name": "Session",
+    "renderer": "OpenGL",
+    "shaderCompiler": "",
+    "shaderIncludePaths": "",
+    "shaderPreamble": "",
+    "type": "Session"
+}
