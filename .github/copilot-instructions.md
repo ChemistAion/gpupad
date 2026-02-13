@@ -53,3 +53,18 @@ For offside experiments:
 - Never exfiltrate secrets.
 - Don’t add telemetry, network calls, or logging of sensitive data unless requested.
 - Avoid generating or including copyrighted content not provided by the user.
+
+
+<!-- Added 2026-02-13T21:51:05Z -->
+
+## Additions (2026-02-13T21:51:05Z)
+- Study the codebase first and mirror existing architecture, naming, and feature/editor machinery instead of inventing new patterns.
+- Prefer alignment with project conventions over clever or overly optimized approaches.
+- If a plan/progress file is provided for the task, keep it updated and note major blockers briefly.
+- (MUST!) Avoid interactive terminal tools (vim/less/MORE) or any output that requires user scrolling.
+- (MUST!) Disable pagers for git commands and keep output concise; avoid dumping heavy diffs or parsing logs into chat.
+- Work independently through sub-steps; ask for user input only when a decision or permission is required.
+- (MUST!) After meaningful changes, run relevant build/tests and iterate until they pass.
+- Do not create commits unless explicitly requested, work as locally, working changes untill we are happy (perhaps my explicit prompt about hat).
+- When asked to commit working changes, follow the requested structure and force-push afterward by default.
+
