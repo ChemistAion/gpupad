@@ -74,7 +74,7 @@
             "sliders": true,
             "type": "Binding",
             "values": [
-                "0.529",
+                "0.283",
                 "0.511",
                 "0.61"
             ]

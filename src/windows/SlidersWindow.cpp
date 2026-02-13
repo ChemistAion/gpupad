@@ -7,7 +7,6 @@
 #include <QLabel>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QSet>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QVBoxLayout>
@@ -56,7 +55,7 @@ SlidersWindow::SlidersWindow(QWidget *parent)
     mLayout->setContentsMargins(8, 8, 8, 8);
     mLayout->setSpacing(8);
 
-    mEmptyLabel = new QLabel(tr("Select a slider binding to edit."), mContainer);
+    mEmptyLabel = new QLabel(tr("No slider bindings in session."), mContainer);
     mEmptyLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     mLayout->addWidget(mEmptyLabel);
     mLayout->addStretch();
@@ -64,17 +63,13 @@ SlidersWindow::SlidersWindow(QWidget *parent)
     mScrollArea->setWidget(mContainer);
     layout->addWidget(mScrollArea);
 
-    connect(&mModel, &QAbstractItemModel::dataChanged, this,
-        [this](const QModelIndex &, const QModelIndex &) {
-            if (!mUpdating)
-                rebuild();
-        });
-}
-
-void SlidersWindow::setSelection(const QModelIndexList &selection)
-{
-    mSelection = selection;
-    rebuild();
+    const auto rebuildGuarded = [this]() {
+        if (!mUpdating)
+            rebuild();
+    };
+    connect(&mModel, &QAbstractItemModel::dataChanged, this, rebuildGuarded);
+    connect(&mModel, &QAbstractItemModel::rowsInserted, this, rebuildGuarded);
+    connect(&mModel, &QAbstractItemModel::rowsRemoved, this, rebuildGuarded);
 }
 
 bool SlidersWindow::hasSliderBindings() const
@@ -99,30 +94,22 @@ void SlidersWindow::rebuild()
     mControls.clear();
 
     auto hasSliders = false;
-    auto processed = QSet<ItemId>();
 
-    for (const auto &index : mSelection) {
-        const auto binding = mModel.item<Binding>(index);
-        if (!binding)
-            continue;
-        if (binding->bindingType != Binding::BindingType::Uniform)
-            continue;
-        if (!binding->sliders)
-            continue;
-        if (binding->editor == Binding::Editor::Color)
-            continue;
-        if (processed.contains(binding->id))
-            continue;
-        processed.insert(binding->id);
+    mModel.forEachItem<Binding>([&](const Binding &binding) {
+        if (binding.bindingType != Binding::BindingType::Uniform)
+            return;
+        if (!binding.sliders)
+            return;
+        if (binding.editor == Binding::Editor::Color)
+            return;
 
         hasSliders = true;
-
-        auto group = new QGroupBox(getBindingTitle(mModel, binding->id),
+        auto group = new QGroupBox(getBindingTitle(mModel, binding.id),
             mContainer);
         auto formLayout = new QFormLayout(group);
         formLayout->setContentsMargins(8, 8, 8, 8);
 
-        auto values = binding->values;
+        auto values = binding.values;
         if (values.isEmpty())
             values.append("0");
 
@@ -156,7 +143,7 @@ void SlidersWindow::rebuild()
             formLayout->addRow(tr("Value %1").arg(i + 1), rowWidget);
 
             connect(slider, &QSlider::valueChanged, this,
-                [this, bindingId = binding->id, valueIndex = i, spin](int v) {
+                [this, bindingId = binding.id, valueIndex = i, spin](int v) {
                     const auto value = fromSliderValue(v);
                     if (!spin->hasFocus()) {
                         const QSignalBlocker blocker(spin);
@@ -165,7 +152,7 @@ void SlidersWindow::rebuild()
                     updateBindingValue(bindingId, valueIndex, value);
                 });
             connect(spin, &QDoubleSpinBox::valueChanged, this,
-                [this, bindingId = binding->id, valueIndex = i, slider](
+                [this, bindingId = binding.id, valueIndex = i, slider](
                     double value) {
                     const auto sliderValue = toSliderValue(value);
                     if (!slider->hasFocus()) {
@@ -176,14 +163,14 @@ void SlidersWindow::rebuild()
                 });
 
             mControls.push_back(
-                SliderControl{ binding->id, i, slider, spin });
+                SliderControl{ binding.id, i, slider, spin });
         }
 
         mLayout->addWidget(group);
-    }
+    });
 
     if (!hasSliders) {
-        mEmptyLabel = new QLabel(tr("Select a slider binding to edit."),
+        mEmptyLabel = new QLabel(tr("No slider bindings in session."),
             mContainer);
         mEmptyLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         mLayout->addWidget(mEmptyLabel);
