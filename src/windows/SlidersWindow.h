@@ -2,7 +2,6 @@
 
 #include "session/SessionModel.h"
 #include <QFrame>
-#include <QModelIndexList>
 #include <QVector>
 
 class QScrollArea;
@@ -18,7 +17,7 @@ class SlidersWindow final : public QFrame
 public:
     explicit SlidersWindow(QWidget *parent = nullptr);
 
-    void setSelection(const QModelIndexList &selection);
+    void rebuild();
     bool hasSliderBindings() const;
 
 private:
@@ -30,7 +29,6 @@ private:
         QDoubleSpinBox *spin{};
     };
 
-    void rebuild();
     void clearLayout();
     QString formatValue(double value) const;
     void updateBindingValue(ItemId bindingId, int valueIndex, double value);
@@ -40,7 +38,6 @@ private:
     QWidget *mContainer{};
     QVBoxLayout *mLayout{};
     QLabel *mEmptyLabel{};
-    QModelIndexList mSelection;
     QVector<SliderControl> mControls;
     bool mUpdating{};
 };

@@ -213,6 +213,7 @@ MainWindow::MainWindow(QWidget *parent)
     mUi->toolBarMain->insertAction(mUi->actionEvalReset,
         mUi->actionShowSliders);
     splitDockWidget(outputDock, dock, Qt::Vertical);
+    dock->setVisible(false);
     mSlidersDock = dock;
 
     mUi->toolBarMain->insertSeparator(mUi->actionEvalReset);
@@ -269,9 +270,6 @@ MainWindow::MainWindow(QWidget *parent)
             if (checked)
                 updateSlidersSelection();
         });
-    connect(mSessionEditor->selectionModel(),
-        &QItemSelectionModel::selectionChanged, this,
-        &MainWindow::updateSlidersSelection);
     connect(&Singletons::sessionModel(), &SessionModel::dataChanged, this,
         &MainWindow::updateSlidersSelection);
     connect(&Singletons::sessionModel(), &SessionModel::rowsInserted, this,
@@ -462,6 +460,7 @@ void MainWindow::readSettings()
         restoreState(settings.value("state").toByteArray());
         mSessionSplitter->restoreState(
             settings.value("sessionSplitter").toByteArray());
+        updateSlidersSelection();
     });
 
     Singletons::fileDialog().setDirectory(
@@ -1168,9 +1167,6 @@ void MainWindow::updateCustomActionsMenu()
 
 void MainWindow::updateSlidersSelection()
 {
-    mSlidersWindow->setSelection(
-        mSessionEditor->selectionModel()->selectedRows());
-
     auto hasSliders = false;
     Singletons::sessionModel().forEachItem<Binding>(
         [&](const Binding &binding) {
@@ -1183,8 +1179,9 @@ void MainWindow::updateSlidersSelection()
             hasSliders = true;
         });
 
-    mUi->actionShowSliders->setEnabled(
-        hasSliders || mSlidersDock->isVisible());
+    mUi->actionShowSliders->setEnabled(hasSliders);
+    if (!hasSliders)
+        mUi->actionShowSliders->setChecked(false);
 }
 
 void MainWindow::handleMessageActivated(ItemId itemId, QString fileName,
