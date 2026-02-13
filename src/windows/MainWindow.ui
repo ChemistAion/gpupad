@@ -507,6 +507,14 @@
     <string>Editor Theme</string>
    </property>
   </action>
+  <action name="actionShowSliders">
+   <property name="icon">
+    <iconset theme="sliders"/>
+   </property>
+   <property name="text">
+    <string>Show &amp;Sliders</string>
+   </property>
+  </action>
   <action name="actionEvalReset">
    <property name="icon">
     <iconset theme="view-refresh"/>

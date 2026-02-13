@@ -6,6 +6,7 @@
 #include "MessageList.h"
 #include "MessageWindow.h"
 #include "OutputWindow.h"
+#include "SlidersWindow.h"
 #include "Settings.h"
 #include "Singletons.h"
 #include "SynchronizeLogic.h"
@@ -45,6 +46,7 @@ MainWindow::MainWindow(QWidget *parent)
     , mSingletons(new Singletons(this))
     , mOutputWindow(std::make_unique<OutputWindow>())
     , mFileBrowserWindow(std::make_unique<FileBrowserWindow>())
+    , mSlidersWindow(std::make_unique<SlidersWindow>())
     , mEditorManager(Singletons::editorManager())
     , mSessionEditor(std::make_unique<SessionEditor>())
     , mPropertiesEditor(std::make_unique<PropertiesEditor>())
@@ -196,6 +198,23 @@ MainWindow::MainWindow(QWidget *parent)
     splitDockWidget(editorsDock, dock, Qt::Horizontal);
     auto outputDock = dock;
 
+    dock = new QDockWidget(tr("Sliders"), this);
+    dock->setObjectName("Sliders");
+    dock->setTitleBarWidget(new WindowTitle(dock));
+    dock->setFeatures(QDockWidget::DockWidgetClosable
+        | QDockWidget::DockWidgetMovable);
+    dock->setWidget(mSlidersWindow.get());
+    dock->setVisible(false);
+    dock->setMinimumSize(150, 150);
+    mUi->actionShowSliders->setCheckable(true);
+    connect(dock, &QDockWidget::visibilityChanged,
+        mUi->actionShowSliders, &QAction::setChecked);
+    mUi->menuView->addAction(mUi->actionShowSliders);
+    mUi->toolBarMain->insertAction(mUi->actionEvalReset,
+        mUi->actionShowSliders);
+    splitDockWidget(outputDock, dock, Qt::Vertical);
+    mSlidersDock = dock;
+
     mUi->toolBarMain->insertSeparator(mUi->actionEvalReset);
 
     mUi->actionQuit->setShortcuts(QKeySequence::Quit);
@@ -244,6 +263,15 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::close);
     connect(mUi->actionOpenContainingFolder, &QAction::triggered, this,
         &MainWindow::openContainingFolder);
+    connect(mUi->actionShowSliders, &QAction::toggled, this,
+        [this](bool checked) {
+            mSlidersDock->setVisible(checked);
+            if (checked)
+                updateSlidersSelection();
+        });
+    connect(mSessionEditor->selectionModel(),
+        &QItemSelectionModel::selectionChanged, this,
+        &MainWindow::updateSlidersSelection);
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,
@@ -377,6 +405,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     readSettings();
     settings.applyTheme();
+    updateSlidersSelection();
 }
 
 MainWindow::~MainWindow()
@@ -557,6 +586,19 @@ QMenu *MainWindow::createPopupMenu()
         toggleVisibleMenu->addAction(toggleVisible);
     }
 
+    const auto insertAfterAction = [&](QAction *after, QAction *action) {
+        if (!after) {
+            menu->addAction(action);
+            return;
+        }
+        const auto actions = menu->actions();
+        const auto index = actions.indexOf(after);
+        if (index >= 0 && index + 1 < actions.size())
+            menu->insertAction(actions[index + 1], action);
+        else
+            menu->addAction(action);
+    };
+
     const auto firstSeparator = [&]() {
         auto separator = std::add_pointer_t<QAction>{};
         const auto actions = menu->actions();
@@ -570,6 +612,13 @@ QMenu *MainWindow::createPopupMenu()
         }
         return separator;
     }();
+    auto outputAction = std::add_pointer_t<QAction>{};
+    for (auto action : menu->actions())
+        if (action->objectName() == "toggleOutput") {
+            outputAction = action;
+            break;
+        }
+    insertAfterAction(outputAction, mUi->actionShowSliders);
     menu->insertMenu(firstSeparator, toggleVisibleMenu);
     menu->addSeparator();
     menu->addAction(mUi->actionHideMenuBar);
@@ -837,6 +886,7 @@ bool MainWindow::openSession(const QString &fileName)
         mSessionEditor->activateFirstTextureItem();
         editors.setAutoRaise(true);
     }
+    updateSlidersSelection();
     return true;
 }
 
@@ -1013,7 +1063,9 @@ bool MainWindow::closeSession()
     mOutputWindow->setText("");
     updateCurrentEditor();
 
-    return mSessionEditor->clear();
+    const auto cleared = mSessionEditor->clear();
+    updateSlidersSelection();
+    return cleared;
 }
 
 bool MainWindow::reloadSession()
@@ -1106,6 +1158,27 @@ void MainWindow::updateCustomActionsMenu()
     }
     mUi->menuCustomActions->clear();
     mUi->menuCustomActions->addActions(actions);
+}
+
+void MainWindow::updateSlidersSelection()
+{
+    mSlidersWindow->setSelection(
+        mSessionEditor->selectionModel()->selectedRows());
+
+    auto hasSliders = false;
+    Singletons::sessionModel().forEachItem<Binding>(
+        [&](const Binding &binding) {
+            if (binding.bindingType != Binding::BindingType::Uniform)
+                return;
+            if (!binding.sliders)
+                return;
+            if (binding.editor == Binding::Editor::Color)
+                return;
+            hasSliders = true;
+        });
+
+    mUi->actionShowSliders->setEnabled(
+        hasSliders || mSlidersDock->isVisible());
 }
 
 void MainWindow::handleMessageActivated(ItemId itemId, QString fileName,

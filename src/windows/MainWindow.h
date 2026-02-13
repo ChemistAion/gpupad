@@ -17,6 +17,7 @@ class Singletons;
 class MessageWindow;
 class OutputWindow;
 class FileBrowserWindow;
+class SlidersWindow;
 class EditorManager;
 class SessionEditor;
 class PropertiesEditor;
@@ -85,6 +86,7 @@ private:
     void updateRecentFileActions();
     void openRecentFile();
     void updateCustomActionsMenu();
+    void updateSlidersSelection();
     void handleMessageActivated(ItemId itemId, QString fileName, int line,
         int column);
     void handleThemeChanging(const Theme &theme);
@@ -101,6 +103,8 @@ private:
     std::unique_ptr<Singletons> mSingletons;
     std::unique_ptr<OutputWindow> mOutputWindow;
     std::unique_ptr<FileBrowserWindow> mFileBrowserWindow;
+    std::unique_ptr<SlidersWindow> mSlidersWindow;
+    QDockWidget *mSlidersDock{};
     EditorManager &mEditorManager;
     std::unique_ptr<SessionEditor> mSessionEditor;
     QDockWidget *mSessionDock{};
