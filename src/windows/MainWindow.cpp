@@ -272,6 +272,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(mSessionEditor->selectionModel(),
         &QItemSelectionModel::selectionChanged, this,
         &MainWindow::updateSlidersSelection);
+    connect(&Singletons::sessionModel(), &SessionModel::dataChanged, this,
+        &MainWindow::updateSlidersSelection);
+    connect(&Singletons::sessionModel(), &SessionModel::rowsInserted, this,
+        &MainWindow::updateSlidersSelection);
+    connect(&Singletons::sessionModel(), &SessionModel::rowsRemoved, this,
+        &MainWindow::updateSlidersSelection);
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,

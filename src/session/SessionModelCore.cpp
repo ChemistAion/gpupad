@@ -308,6 +308,9 @@ QVariant SessionModelCore::data(const QModelIndex &index, int role) const
     if (role == Qt::CheckStateRole) {
         if (auto call = castItem<Call>(item))
             return (call->checked ? Qt::Checked : Qt::Unchecked);
+        if (auto binding = castItem<Binding>(item))
+            if (binding->bindingType == Binding::BindingType::Uniform)
+                return (binding->sliders ? Qt::Checked : Qt::Unchecked);
         return {};
     }
 
@@ -348,6 +351,14 @@ bool SessionModelCore::setData(const QModelIndex &index, const QVariant &value,
             undoableAssignment(index, &static_cast<Call &>(item).checked,
                 checked);
             return true;
+        case Item::Type::Binding:
+            if (static_cast<Binding &>(item).bindingType
+                == Binding::BindingType::Uniform) {
+                undoableAssignment(index,
+                    &static_cast<Binding &>(item).sliders, checked);
+                return true;
+            }
+            return false;
         default: return false;
         }
     }
