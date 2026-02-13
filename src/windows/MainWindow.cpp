@@ -16,6 +16,7 @@
 #include "editors/sliders/SlidersEditor.h"
 #include "getEventPosition.h"
 #include "scripting/CustomActions.h"
+#include "session/Item.h"
 #include "session/SessionEditor.h"
 #include "session/SessionModel.h"
 #include "session/PropertiesEditor.h"
@@ -194,12 +195,50 @@ MainWindow::MainWindow(QWidget *parent)
     action->setText(tr("Show &") + action->text());
     action->setIcon(QIcon::fromTheme("utilities-terminal"));
     mUi->menuView->addAction(action);
-    mUi->menuView->addAction(mUi->actionShowSliders);
     mUi->toolBarMain->insertAction(mUi->actionEvalReset, action);
-    mUi->toolBarMain->insertAction(mUi->actionEvalReset,
-        mUi->actionShowSliders);
     splitDockWidget(editorsDock, dock, Qt::Horizontal);
     auto outputDock = dock;
+
+    mEditorManager.setAutoRaise(false);
+    auto slidersEditor = mEditorManager.openSlidersEditor();
+    mEditorManager.setAutoRaise(true);
+    auto slidersDock = mEditorManager.getEditorDock(slidersEditor);
+    mUi->actionShowSliders->setCheckable(true);
+    mUi->menuView->addAction(mUi->actionShowSliders);
+    mUi->toolBarMain->insertAction(mUi->actionEvalReset,
+        mUi->actionShowSliders);
+    mUi->actionShowSliders->setChecked(slidersDock
+        && slidersDock->isVisible());
+    const auto ensureSlidersDock = [this]() {
+        auto editor = mEditorManager.getSlidersEditor();
+        if (!editor)
+            editor = mEditorManager.openSlidersEditor();
+        auto dock = mEditorManager.getEditorDock(editor);
+        if (dock) {
+            connect(dock, &QDockWidget::visibilityChanged,
+                mUi->actionShowSliders, &QAction::setChecked,
+                Qt::UniqueConnection);
+            connect(dock, &QObject::destroyed, this,
+                [this]() { mUi->actionShowSliders->setChecked(false); },
+                Qt::UniqueConnection);
+        }
+        return dock;
+    };
+    connect(mUi->actionShowSliders, &QAction::toggled, this,
+        [this, ensureSlidersDock](bool checked) {
+            if (checked) {
+                if (auto dock = ensureSlidersDock())
+                    dock->setVisible(true);
+                return;
+            }
+            if (auto editor = mEditorManager.getSlidersEditor())
+                if (auto dock = mEditorManager.getEditorDock(editor))
+                    dock->setVisible(false);
+        });
+    if (slidersDock) {
+        slidersDock->setVisible(false);
+        ensureSlidersDock();
+    }
 
     mUi->toolBarMain->insertSeparator(mUi->actionEvalReset);
 
@@ -249,9 +288,6 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::close);
     connect(mUi->actionOpenContainingFolder, &QAction::triggered, this,
         &MainWindow::openContainingFolder);
-    mUi->actionShowSliders->setCheckable(true);
-    connect(mUi->actionShowSliders, &QAction::toggled, this,
-        &MainWindow::toggleSlidersEditor);
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,
@@ -388,6 +424,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     readSettings();
     settings.applyTheme();
+    updateSlidersSelection();
 }
 
 MainWindow::~MainWindow()
@@ -868,6 +905,7 @@ bool MainWindow::openSession(const QString &fileName)
         mSessionEditor->activateFirstTextureItem();
         editors.setAutoRaise(true);
     }
+    updateSlidersSelection();
     return true;
 }
 
@@ -1044,7 +1082,9 @@ bool MainWindow::closeSession()
     mOutputWindow->setText("");
     updateCurrentEditor();
 
-    return mSessionEditor->clear();
+    const auto cleared = mSessionEditor->clear();
+    updateSlidersSelection();
+    return cleared;
 }
 
 bool MainWindow::reloadSession()
@@ -1139,43 +1179,31 @@ void MainWindow::updateCustomActionsMenu()
     mUi->menuCustomActions->addActions(actions);
 }
 
-void MainWindow::toggleSlidersEditor(bool show)
-{
-    if (show) {
-        auto editor = mEditorManager.openSlidersEditor();
-        if (auto dock = mEditorManager.getEditorDock(editor)) {
-            dock->setVisible(true);
-            mEditorManager.raiseDock(dock);
-            if (mSlidersDockVisibilityConnection)
-                disconnect(mSlidersDockVisibilityConnection);
-            if (mSlidersDockDestroyedConnection)
-                disconnect(mSlidersDockDestroyedConnection);
-            mSlidersDockVisibilityConnection = connect(dock,
-                &QDockWidget::visibilityChanged, this,
-                [this](bool visible) {
-                    mUi->actionShowSliders->setChecked(visible);
-                });
-            mSlidersDockDestroyedConnection = connect(dock, &QObject::destroyed,
-                this, [this]() {
-                    mUi->actionShowSliders->setChecked(false);
-                });
-        }
-        updateSlidersSelection();
-        if (editor)
-            editor->setFocus();
-    } else if (auto editor = mEditorManager.getSlidersEditor()) {
-        if (auto dock = mEditorManager.getEditorDock(editor))
-            dock->setVisible(false);
-    }
-}
-
 void MainWindow::updateSlidersSelection()
 {
     auto editor = mEditorManager.getSlidersEditor();
-    if (!editor)
-        return;
+    if (editor)
+        editor->setSelection(mSessionEditor->selectionModel()->selectedRows());
 
-    editor->setSelection(mSessionEditor->selectionModel()->selectedRows());
+    auto hasSliders = false;
+    Singletons::sessionModel().forEachItem<Binding>(
+        [&](const Binding &binding) {
+            if (binding.bindingType != Binding::BindingType::Uniform)
+                return;
+            if (!binding.sliders)
+                return;
+            if (binding.editor == Binding::Editor::Color)
+                return;
+            hasSliders = true;
+        });
+
+    const auto slidersDock = editor
+        ? mEditorManager.getEditorDock(editor)
+        : nullptr;
+    mUi->actionShowSliders->setEnabled(
+        hasSliders || (slidersDock && slidersDock->isVisible()));
+    if (!slidersDock)
+        mUi->actionShowSliders->setChecked(false);
 }
 
 void MainWindow::handleMessageActivated(ItemId itemId, QString fileName,
@@ -1356,3 +1384,12 @@ void MainWindow::openAbout()
     about.setModal(true);
     about.exec();
 }
+
+
+
+
+
+
+
+
+

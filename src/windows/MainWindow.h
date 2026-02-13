@@ -85,7 +85,6 @@ private:
     void updateRecentFileActions();
     void openRecentFile();
     void updateCustomActionsMenu();
-    void toggleSlidersEditor(bool show);
     void updateSlidersSelection();
     void handleMessageActivated(ItemId itemId, QString fileName, int line,
         int column);
@@ -108,8 +107,6 @@ private:
     QDockWidget *mSessionDock{};
     std::unique_ptr<PropertiesEditor> mPropertiesEditor;
     QList<QMetaObject::Connection> mConnectedEditActions;
-    QMetaObject::Connection mSlidersDockVisibilityConnection;
-    QMetaObject::Connection mSlidersDockDestroyedConnection;
     QStringList mRecentFiles;
     QList<QAction *> mRecentSessionActions;
     QList<QAction *> mRecentFileActions;

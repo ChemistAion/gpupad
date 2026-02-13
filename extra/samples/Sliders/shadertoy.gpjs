@@ -69,14 +69,14 @@
         {
             "bindingType": "Uniform",
             "editor": "Expression3",
-            "id": 934,
+            "id": 935,
             "name": "iTest",
             "sliders": true,
             "type": "Binding",
             "values": [
-                "0.593",
-                "0.511",
-                "0.61"
+                "0.8",
+                "0.8",
+                "0.8"
             ]
         },
         {
