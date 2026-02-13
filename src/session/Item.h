@@ -122,6 +122,7 @@ struct Binding : Item
 
     BindingType bindingType{ BindingType::Uniform };
     Editor editor{ Editor::Expression };
+    bool sliders{};
     QStringList values{ "0" };
     ItemId textureId{};
     ItemId bufferId{};

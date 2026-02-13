@@ -597,6 +597,8 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
         const auto &binding = static_cast<const Binding &>(item);
         const auto uniform =
             (binding.bindingType == Binding::BindingType::Uniform);
+        const auto supportsSlider =
+            (uniform && binding.editor != Binding::Editor::Color);
         const auto sampler =
             (binding.bindingType == Binding::BindingType::Sampler);
         const auto image = (binding.bindingType == Binding::BindingType::Image);
@@ -609,6 +611,8 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
         const auto subroutine =
             (binding.bindingType == Binding::BindingType::Subroutine);
         result &= (column != BindingEditor || uniform);
+        result &= (column != BindingSliderEnabled
+            || (supportsSlider && binding.sliders));
         result &= (column != BindingValues || uniform);
         result &= (column != BindingTextureId || image || sampler);
         result &= (column != BindingLevel || image);

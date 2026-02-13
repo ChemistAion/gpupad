@@ -41,6 +41,7 @@
     ADD(ShaderIncludePaths, Shader, includePaths)                             \
     ADD(BindingType, Binding, bindingType)                                    \
     ADD(BindingEditor, Binding, editor)                                       \
+    ADD(BindingSliderEnabled, Binding, sliders)                               \
     ADD(BindingValues, Binding, values)                                       \
     ADD(BindingTextureId, Binding, textureId)                                 \
     ADD(BindingBufferId, Binding, bufferId)                                   \
