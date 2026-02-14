@@ -14,27 +14,86 @@
 #include <cmath>
 
 namespace {
-    constexpr double SliderMin = 0.0;
-    constexpr double SliderMax = 1.0;
-    constexpr double SliderStep = 0.01;
     constexpr int SliderResolution = 1000;
 
-    int toSliderValue(double value)
+    int toSliderValue(double value, double rangeMin, double rangeMax)
     {
-        const auto clamped = std::clamp(value, SliderMin, SliderMax);
-        const auto t = (clamped - SliderMin) / (SliderMax - SliderMin);
+        const auto clamped = std::clamp(value, rangeMin, rangeMax);
+        const auto t = (clamped - rangeMin) / (rangeMax - rangeMin);
         return static_cast<int>(std::round(t * SliderResolution));
     }
 
-    double fromSliderValue(int value)
+    double fromSliderValue(int value, double rangeMin, double rangeMax)
     {
         const auto t = static_cast<double>(value) / SliderResolution;
-        return SliderMin + (SliderMax - SliderMin) * t;
+        return rangeMin + (rangeMax - rangeMin) * t;
+    }
+
+    std::pair<double, double> computeRange(const QStringList &values)
+    {
+        auto lo = 0.0;
+        auto hi = 1.0;
+        for (const auto &v : values) {
+            auto ok = false;
+            const auto d = v.toDouble(&ok);
+            if (ok) {
+                lo = std::min(lo, d);
+                hi = std::max(hi, d);
+            }
+        }
+        // add headroom so the slider isn't pinned at the extremes
+        const auto margin = std::max(0.5, (hi - lo) * 0.25);
+        return { lo - margin, hi + margin };
     }
 
     QString getBindingTitle(const SessionModel &model, ItemId bindingId)
     {
-        return model.getFullItemName(bindingId);
+        return model.getItemName(bindingId);
+    }
+
+    QString getValueLabel(Binding::Editor editor, int index)
+    {
+        switch (editor) {
+        case Binding::Editor::Expression:
+            return QStringLiteral("Value");
+
+        case Binding::Editor::Expression2:
+        case Binding::Editor::Expression3:
+        case Binding::Editor::Expression4:
+            return QStringLiteral("Value[%1]").arg(index);
+
+        case Binding::Editor::Expression2x2:
+        case Binding::Editor::Expression2x3:
+        case Binding::Editor::Expression2x4:
+        case Binding::Editor::Expression3x2:
+        case Binding::Editor::Expression3x3:
+        case Binding::Editor::Expression3x4:
+        case Binding::Editor::Expression4x2:
+        case Binding::Editor::Expression4x3:
+        case Binding::Editor::Expression4x4: {
+            // AxB = A columns x B rows, column-major storage
+            auto cols = 0;
+            auto rows = 0;
+            switch (editor) {
+            case Binding::Editor::Expression2x2: cols = 2; rows = 2; break;
+            case Binding::Editor::Expression2x3: cols = 2; rows = 3; break;
+            case Binding::Editor::Expression2x4: cols = 2; rows = 4; break;
+            case Binding::Editor::Expression3x2: cols = 3; rows = 2; break;
+            case Binding::Editor::Expression3x3: cols = 3; rows = 3; break;
+            case Binding::Editor::Expression3x4: cols = 3; rows = 4; break;
+            case Binding::Editor::Expression4x2: cols = 4; rows = 2; break;
+            case Binding::Editor::Expression4x3: cols = 4; rows = 3; break;
+            case Binding::Editor::Expression4x4: cols = 4; rows = 4; break;
+            default: break;
+            }
+            const auto col = index / rows;
+            const auto row = index % rows;
+            return QStringLiteral("Value[%1][%2]").arg(col).arg(row);
+        }
+
+        default:
+            return QStringLiteral("Value[%1]").arg(index);
+        }
     }
 } // namespace
 
@@ -113,6 +172,9 @@ void SlidersWindow::rebuild()
         if (values.isEmpty())
             values.append("0");
 
+        const auto [rangeMin, rangeMax] = computeRange(values);
+        const auto step = (rangeMax - rangeMin) / SliderResolution;
+
         for (auto i = 0; i < values.size(); ++i) {
             auto rowWidget = new QWidget(group);
             auto rowLayout = new QHBoxLayout(rowWidget);
@@ -123,14 +185,14 @@ void SlidersWindow::rebuild()
             slider->setSingleStep(1);
 
             auto spin = new QDoubleSpinBox(rowWidget);
-            spin->setRange(SliderMin, SliderMax);
-            spin->setSingleStep(SliderStep);
+            spin->setRange(rangeMin, rangeMax);
+            spin->setSingleStep(step);
             spin->setDecimals(4);
 
             auto ok = false;
             const auto value = values[i].toDouble(&ok);
             if (ok) {
-                slider->setValue(toSliderValue(value));
+                slider->setValue(toSliderValue(value, rangeMin, rangeMax));
                 spin->setValue(value);
             } else {
                 slider->setEnabled(false);
@@ -140,11 +202,12 @@ void SlidersWindow::rebuild()
             rowLayout->addWidget(slider, 1);
             rowLayout->addWidget(spin);
 
-            formLayout->addRow(tr("Value %1").arg(i + 1), rowWidget);
+            formLayout->addRow(getValueLabel(binding.editor, i), rowWidget);
 
             connect(slider, &QSlider::valueChanged, this,
-                [this, bindingId = binding.id, valueIndex = i, spin](int v) {
-                    const auto value = fromSliderValue(v);
+                [this, bindingId = binding.id, valueIndex = i, spin,
+                    rangeMin, rangeMax](int v) {
+                    const auto value = fromSliderValue(v, rangeMin, rangeMax);
                     if (!spin->hasFocus()) {
                         const QSignalBlocker blocker(spin);
                         spin->setValue(value);
@@ -152,9 +215,10 @@ void SlidersWindow::rebuild()
                     updateBindingValue(bindingId, valueIndex, value);
                 });
             connect(spin, &QDoubleSpinBox::valueChanged, this,
-                [this, bindingId = binding.id, valueIndex = i, slider](
-                    double value) {
-                    const auto sliderValue = toSliderValue(value);
+                [this, bindingId = binding.id, valueIndex = i, slider,
+                    rangeMin, rangeMax](double value) {
+                    const auto sliderValue =
+                        toSliderValue(value, rangeMin, rangeMax);
                     if (!slider->hasFocus()) {
                         const QSignalBlocker blocker(slider);
                         slider->setValue(sliderValue);
