@@ -386,13 +386,11 @@ QDir getInstallDirectory(const QString &dirName)
             ? QDir::cleanPath(binDir.filePath(".."))
             : binDir);
     const auto searchPaths = std::initializer_list<QDir>{
-#if !defined(NDEBUG)
         installDir.filePath("../../extra"),
         installDir.filePath("../extra"),
         installDir.filePath("extra"),
         installDir.filePath(".."),
         installDir.filePath("../.."),
-#endif
 #if defined(_WIN32)
         installDir.path(),
 #else
