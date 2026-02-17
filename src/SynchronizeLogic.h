@@ -6,6 +6,7 @@
 #include "session/Item.h"
 #include <QObject>
 #include <QSet>
+#include <QElapsedTimer>
 
 class QTimer;
 class SessionModel;
@@ -26,6 +27,9 @@ public:
     void setEvaluationMode(EvaluationMode mode);
     EvaluationMode evaluationMode() const { return mEvaluationMode; }
     void resetEvaluation();
+
+    double time() const { return mTime; }
+    int frameIndex() const { return mFrameIndex; }
     void manualEvaluation();
     bool resetRenderSessionInvalidationState();
     void updateEditor(ItemId itemId, bool activated);
@@ -87,5 +91,9 @@ private:
     QString mProcessSourceType{};
     QTimer *mProcessSourceTimer{};
     std::unique_ptr<ProcessSource> mProcessSource;
+    double mTime{};
+    int mFrameIndex{};
+    double mTimeOffset{};
+    QElapsedTimer mElapsedTimer;
     std::unique_ptr<RenderSessionBase> mRenderSession;
 };

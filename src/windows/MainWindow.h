@@ -18,6 +18,7 @@ class MessageWindow;
 class OutputWindow;
 class FileBrowserWindow;
 class SlidersWindow;
+class SequencerWindow;
 class EditorManager;
 class SessionEditor;
 class PropertiesEditor;
@@ -105,6 +106,8 @@ private:
     std::unique_ptr<FileBrowserWindow> mFileBrowserWindow;
     std::unique_ptr<SlidersWindow> mSlidersWindow;
     QDockWidget *mSlidersDock{};
+    std::unique_ptr<SequencerWindow> mSequencerWindow;
+    QDockWidget *mSequencerDock{};
     EditorManager &mEditorManager;
     std::unique_ptr<SessionEditor> mSessionEditor;
     QDockWidget *mSessionDock{};

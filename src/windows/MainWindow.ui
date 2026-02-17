@@ -515,6 +515,14 @@
     <string>Show &amp;Sliders</string>
    </property>
   </action>
+  <action name="actionShowSequencer">
+   <property name="icon">
+    <iconset theme="sequencer"/>
+   </property>
+   <property name="text">
+    <string>Show Se&amp;quencer</string>
+   </property>
+  </action>
   <action name="actionEvalReset">
    <property name="icon">
     <iconset theme="view-refresh"/>
