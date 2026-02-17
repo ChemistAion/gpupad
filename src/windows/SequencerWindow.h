@@ -1,6 +1,8 @@
 #pragma once
 
+#include "session/SessionModel.h"
 #include <QFrame>
+#include <QVector>
 
 class QScrollArea;
 class QVBoxLayout;
@@ -13,9 +15,24 @@ class SequencerWindow final : public QFrame
 public:
     explicit SequencerWindow(QWidget *parent = nullptr);
 
+    void rebuild();
+
+    struct TrackInfo
+    {
+        ItemId bindingId{};
+        QString name;
+    };
+
 private:
+    void clearLayout();
+
+    SessionModel &mModel;
     QScrollArea *mScrollArea{};
     QWidget *mContainer{};
     QVBoxLayout *mLayout{};
+    QWidget *mTimeline{};
     QLabel *mEmptyLabel{};
+    QVector<TrackInfo> mTracks;
+    bool mUpdating{};
 };
+
