@@ -31,6 +31,7 @@ private:
     QWidget *mContainer{};
     QVBoxLayout *mLayout{};
     QWidget *mTimeline{};
+    QLabel *mTimerLabel{};
     QLabel *mEmptyLabel{};
     QVector<TrackInfo> mTracks;
     bool mUpdating{};
