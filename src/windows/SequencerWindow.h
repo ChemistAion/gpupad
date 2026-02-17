@@ -7,6 +7,7 @@
 class QScrollArea;
 class QVBoxLayout;
 class QLabel;
+class QTimer;
 
 class SequencerWindow final : public QFrame
 {
@@ -34,6 +35,7 @@ private:
     QLabel *mTimerLabel{};
     QLabel *mEmptyLabel{};
     QVector<TrackInfo> mTracks;
+    QTimer *mUITimer{};
     bool mUpdating{};
 };
 

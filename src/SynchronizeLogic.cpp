@@ -416,8 +416,6 @@ void SynchronizeLogic::evaluate(EvaluationType evaluationType)
     if (mEvaluationMode == EvaluationMode::Steady && !mTimeDragging)
         mTime = mTimeOffset + mElapsedTimer.elapsed() / 1000.0;
 
-    Q_EMIT timeChanged(mTime, mFrameIndex);
-
     Singletons::fileCache().updateFromEditors();
     const auto itemsChanged = std::exchange(mRenderSessionInvalidated, false);
     initializeRenderSession();

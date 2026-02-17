@@ -5,6 +5,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -194,6 +195,19 @@ SequencerWindow::SequencerWindow(QWidget *parent)
     connect(&mModel, &QAbstractItemModel::rowsInserted, this, rebuildGuarded);
     connect(&mModel, &QAbstractItemModel::rowsRemoved, this, rebuildGuarded);
 
+    // Poll time at UI refresh rate (~30fps) — keeps the eval hot path clean
+    mUITimer = new QTimer(this);
+    mUITimer->setInterval(30);
+    connect(mUITimer, &QTimer::timeout, this, [this]() {
+        auto &s = Singletons::synchronizeLogic();
+        mTimerLabel->setText(QStringLiteral("Timer: %1s  Frame: %2")
+            .arg(s.time(), 0, 'f', 3).arg(s.frameIndex()));
+        if (auto tl = static_cast<TimelineWidget *>(mTimeline))
+            tl->setPlayhead(s.time());
+    });
+    mUITimer->start();
+
+    // Respond instantly to discrete events (drag scrub, reset)
     auto &sync = Singletons::synchronizeLogic();
     connect(&sync, &SynchronizeLogic::timeChanged, this, [this](double t, int frame) {
         mTimerLabel->setText(QStringLiteral("Timer: %1s  Frame: %2").arg(t, 0, 'f', 3).arg(frame));
