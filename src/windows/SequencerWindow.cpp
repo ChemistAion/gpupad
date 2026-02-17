@@ -1,9 +1,11 @@
 #include "SequencerWindow.h"
 #include "Singletons.h"
+#include "SynchronizeLogic.h"
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -168,6 +170,10 @@ SequencerWindow::SequencerWindow(QWidget *parent)
     auto outerLayout = new QVBoxLayout(this);
     outerLayout->setContentsMargins(0, 0, 0, 0);
 
+    mTimerLabel = new QLabel(QStringLiteral("Timer: 0.000s  Frame: 0"), this);
+    mTimerLabel->setContentsMargins(4, 2, 4, 2);
+    outerLayout->addWidget(mTimerLabel);
+
     mScrollArea = new QScrollArea(this);
     mScrollArea->setWidgetResizable(true);
 
@@ -188,6 +194,26 @@ SequencerWindow::SequencerWindow(QWidget *parent)
     connect(&mModel, &QAbstractItemModel::dataChanged, this, rebuildGuarded);
     connect(&mModel, &QAbstractItemModel::rowsInserted, this, rebuildGuarded);
     connect(&mModel, &QAbstractItemModel::rowsRemoved, this, rebuildGuarded);
+
+    // Poll time at UI refresh rate (~30fps) — keeps the eval hot path clean
+    mUITimer = new QTimer(this);
+    mUITimer->setInterval(30);
+    connect(mUITimer, &QTimer::timeout, this, [this]() {
+        auto &s = Singletons::synchronizeLogic();
+        mTimerLabel->setText(QStringLiteral("Timer: %1s  Frame: %2")
+            .arg(s.time(), 0, 'f', 3).arg(s.frameIndex()));
+        if (auto tl = static_cast<TimelineWidget *>(mTimeline))
+            tl->setPlayhead(s.time());
+    });
+    mUITimer->start();
+
+    // Respond instantly to discrete events (drag scrub, reset)
+    auto &sync = Singletons::synchronizeLogic();
+    connect(&sync, &SynchronizeLogic::timeChanged, this, [this](double t, int frame) {
+        mTimerLabel->setText(QStringLiteral("Timer: %1s  Frame: %2").arg(t, 0, 'f', 3).arg(frame));
+        if (auto tl = static_cast<TimelineWidget *>(mTimeline))
+            tl->setPlayhead(t);
+    });
 }
 
 void SequencerWindow::rebuild()
@@ -213,6 +239,15 @@ void SequencerWindow::rebuild()
     mTimeline = timeline;
     mLayout->insertWidget(0, timeline, 1);
 
+    auto &sync = Singletons::synchronizeLogic();
+    timeline->setPlayhead(sync.time());
+
+    connect(timeline, &TimelineWidget::playheadPressed,
+        this, []() { Singletons::synchronizeLogic().setTimeDragging(true); });
+    connect(timeline, &TimelineWidget::playheadReleased,
+        this, []() { Singletons::synchronizeLogic().setTimeDragging(false); });
+    connect(timeline, &TimelineWidget::playheadDragged,
+        this, [](double t) { Singletons::synchronizeLogic().setTime(t); });
 
     if (mTracks.isEmpty()) {
         mEmptyLabel = new QLabel(tr("No sequencer tracks in session."),

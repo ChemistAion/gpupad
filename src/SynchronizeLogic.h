@@ -30,6 +30,8 @@ public:
 
     double time() const { return mTime; }
     int frameIndex() const { return mFrameIndex; }
+    void setTime(double time);
+    void setTimeDragging(bool dragging);
     void manualEvaluation();
     bool resetRenderSessionInvalidationState();
     void updateEditor(ItemId itemId, bool activated);
@@ -54,6 +56,7 @@ public:
 
 Q_SIGNALS:
     void outputChanged(QVariant output);
+    void timeChanged(double time, int frameIndex);
 
 private:
     void invalidateRenderSession();
@@ -94,6 +97,7 @@ private:
     double mTime{};
     int mFrameIndex{};
     double mTimeOffset{};
+    bool mTimeDragging{};
     QElapsedTimer mElapsedTimer;
     std::unique_ptr<RenderSessionBase> mRenderSession;
 };
