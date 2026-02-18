@@ -68,6 +68,16 @@
         },
         {
             "bindingType": "Uniform",
+            "editor": "Expression",
+            "id": 935,
+            "name": "iTime",
+            "type": "Binding",
+            "values": [
+                "app.time"
+            ]
+        },
+        {
+            "bindingType": "Uniform",
             "editor": "Expression3",
             "id": 934,
             "name": "iTest",

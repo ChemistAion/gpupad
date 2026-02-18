@@ -79,6 +79,7 @@ SynchronizeLogic::SynchronizeLogic(QObject *parent)
 
     mUpdateEditorsTimer->start(100);
     mEvaluationTimer->setTimerType(Qt::PreciseTimer);
+    mElapsedTimer.start();
 
     mProcessSourceTimer->setInterval(50);
     mProcessSourceTimer->setSingleShot(true);
@@ -134,10 +135,32 @@ void SynchronizeLogic::resetRenderSession()
     Singletons::fileCache().unloadAll();
 }
 
+void SynchronizeLogic::setTime(double time)
+{
+    mTime = time;
+    mTimeOffset = time;
+    mElapsedTimer.start();
+    Q_EMIT timeChanged(mTime, mFrameIndex);
+}
+
+void SynchronizeLogic::setTimeDragging(bool dragging)
+{
+    if (std::exchange(mTimeDragging, dragging) == dragging)
+        return;
+    if (!mTimeDragging) {
+        mTimeOffset = mTime;
+        mElapsedTimer.start();
+    }
+}
+
 void SynchronizeLogic::resetEvaluation()
 {
+    mTime = 0.0;
+    mFrameIndex = 0;
+    mElapsedTimer.start();
     evaluate(EvaluationType::Reset);
     Singletons::videoManager().rewindVideoFiles();
+    Q_EMIT timeChanged(mTime, mFrameIndex);
 }
 
 void SynchronizeLogic::manualEvaluation()
@@ -158,6 +181,8 @@ void SynchronizeLogic::setEvaluationMode(EvaluationMode mode)
     mEvaluationMode = mode;
 
     if (mEvaluationMode == EvaluationMode::Steady) {
+        mTimeOffset = mTime;
+        mElapsedTimer.start();
         mEvaluationTimer->setSingleShot(false);
         mEvaluationTimer->start(1);
         Singletons::videoManager().playVideoFiles();
@@ -386,6 +411,11 @@ void SynchronizeLogic::handleEvaluateTimout()
 
 void SynchronizeLogic::evaluate(EvaluationType evaluationType)
 {
+    ++mFrameIndex;
+
+    if (mEvaluationMode == EvaluationMode::Steady && !mTimeDragging)
+        mTime = mTimeOffset + mElapsedTimer.elapsed() / 1000.0;
+
     Singletons::fileCache().updateFromEditors();
     const auto itemsChanged = std::exchange(mRenderSessionInvalidated, false);
     initializeRenderSession();
