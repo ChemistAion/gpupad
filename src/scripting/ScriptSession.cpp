@@ -4,6 +4,7 @@
 #include "objects/AppScriptObject.h"
 #include "objects/SessionScriptObject.h"
 #include "Singletons.h"
+#include "SynchronizeLogic.h"
 
 ScriptSession::ScriptSession(IScriptRenderSession *renderSession,
     QObject *parent)
@@ -63,7 +64,7 @@ bool ScriptSession::usesViewportSize(const QString &fileName) const
 void ScriptSession::update()
 {
     Q_ASSERT(onMainThread());
-    mScriptEngine->appScriptObject().update();
+    mScriptEngine->appScriptObject().update(Singletons::synchronizeLogic().time());
 }
 
 MessagePtrSet ScriptSession::resetMessages()
