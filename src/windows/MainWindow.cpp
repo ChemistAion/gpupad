@@ -7,6 +7,7 @@
 #include "MessageWindow.h"
 #include "OutputWindow.h"
 #include "SlidersWindow.h"
+#include "SequencerWindow.h"
 #include "Settings.h"
 #include "Singletons.h"
 #include "SynchronizeLogic.h"
@@ -47,6 +48,7 @@ MainWindow::MainWindow(QWidget *parent)
     , mOutputWindow(std::make_unique<OutputWindow>())
     , mFileBrowserWindow(std::make_unique<FileBrowserWindow>())
     , mSlidersWindow(std::make_unique<SlidersWindow>())
+    , mSequencerWindow(std::make_unique<SequencerWindow>())
     , mEditorManager(Singletons::editorManager())
     , mSessionEditor(std::make_unique<SessionEditor>())
     , mPropertiesEditor(std::make_unique<PropertiesEditor>())
@@ -216,6 +218,24 @@ MainWindow::MainWindow(QWidget *parent)
     dock->setVisible(false);
     mSlidersDock = dock;
 
+    dock = new QDockWidget(tr("Sequencer"), this);
+    dock->setObjectName("Sequencer");
+    dock->setTitleBarWidget(new WindowTitle(dock));
+    dock->setFeatures(QDockWidget::DockWidgetClosable
+        | QDockWidget::DockWidgetMovable);
+    dock->setWidget(mSequencerWindow.get());
+    dock->setVisible(false);
+    dock->setMinimumSize(300, 150);
+    mUi->actionShowSequencer->setCheckable(true);
+    connect(dock, &QDockWidget::visibilityChanged,
+        mUi->actionShowSequencer, &QAction::setChecked);
+    mUi->menuView->addAction(mUi->actionShowSequencer);
+    mUi->toolBarMain->insertAction(mUi->actionEvalReset,
+        mUi->actionShowSequencer);
+    splitDockWidget(mSlidersDock, dock, Qt::Vertical);
+    dock->setVisible(false);
+    mSequencerDock = dock;
+
     mUi->toolBarMain->insertSeparator(mUi->actionEvalReset);
 
     mUi->actionQuit->setShortcuts(QKeySequence::Quit);
@@ -276,6 +296,10 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::updateSlidersSelection);
     connect(&Singletons::sessionModel(), &SessionModel::rowsRemoved, this,
         &MainWindow::updateSlidersSelection);
+    connect(mUi->actionShowSequencer, &QAction::toggled, this,
+        [this](bool checked) {
+            mSequencerDock->setVisible(checked);
+        });
     connect(mUi->actionOnlineHelp, &QAction::triggered, this,
         &MainWindow::openOnlineHelp);
     connect(mUi->menuWindowThemes, &QMenu::aboutToShow, this,

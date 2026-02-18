@@ -16,6 +16,7 @@
             "type": "Program"
         },
         {
+            "dynamic": false,
             "id": 14,
             "inlineScope": true,
             "items": [
@@ -24,6 +25,7 @@
                     "editor": "Expression2x2",
                     "id": 7,
                     "name": "u_values_0",
+                    "sliders": true,
                     "type": "Binding",
                     "values": [
                         "1.0",
@@ -82,6 +84,7 @@
             "type": "Group"
         },
         {
+            "dynamic": false,
             "id": 13,
             "inlineScope": true,
             "items": [
@@ -266,6 +269,7 @@
             "type": "Group"
         },
         {
+            "dynamic": false,
             "id": 20,
             "inlineScope": true,
             "items": [
@@ -462,6 +466,7 @@
             "type": "Group"
         },
         {
+            "dynamic": false,
             "id": 953,
             "inlineScope": true,
             "items": [

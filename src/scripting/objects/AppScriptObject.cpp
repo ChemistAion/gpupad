@@ -111,11 +111,12 @@ void AppScriptObject::deregisterEditorScriptObject(EditorScriptObject *object)
     mEditorScriptObjects.erase(object);
 }
 
-void AppScriptObject::update()
+void AppScriptObject::update(double time)
 {
     Q_ASSERT(onMainThread());
 
     ++mFrameIndex;
+    mTime = time;
 
     auto &inputState = Singletons::inputState();
     inputState.update();
