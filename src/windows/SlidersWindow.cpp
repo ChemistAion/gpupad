@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QVBoxLayout>
@@ -123,12 +124,32 @@ SlidersWindow::SlidersWindow(QWidget *parent)
     layout->addWidget(mScrollArea);
 
     const auto rebuildGuarded = [this]() {
-        if (!mUpdating)
+        if (mUpdating)
+            return;
+        if (isVisible())
             rebuild();
+        else
+            mRebuildPending = true;
     };
-    connect(&mModel, &QAbstractItemModel::dataChanged, this, rebuildGuarded);
+    connect(&mModel, &QAbstractItemModel::dataChanged, this,
+        [this](const QModelIndex &, const QModelIndex &,
+            const QVector<int> &roles) {
+            if (mUpdating || !roles.isEmpty())
+                return;
+            if (isVisible())
+                rebuild();
+            else
+                mRebuildPending = true;
+        });
     connect(&mModel, &QAbstractItemModel::rowsInserted, this, rebuildGuarded);
     connect(&mModel, &QAbstractItemModel::rowsRemoved, this, rebuildGuarded);
+}
+
+void SlidersWindow::showEvent(QShowEvent *event)
+{
+    QFrame::showEvent(event);
+    if (std::exchange(mRebuildPending, false))
+        rebuild();
 }
 
 bool SlidersWindow::hasSliderBindings() const
