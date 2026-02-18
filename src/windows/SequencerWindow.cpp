@@ -38,6 +38,12 @@ public:
     void setPlayhead(double time)
     {
         if (!mDragging) {
+            const auto timeW = std::max(width() - LabelWidth, 1);
+            const auto px = LabelWidth
+                + static_cast<int>((time / mDuration) * timeW);
+            if (px == mLastPlayheadPx)
+                return;
+            mLastPlayheadPx = px;
             mPlayhead = time;
             update();
         }
@@ -52,7 +58,6 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
 
         const auto w = width();
         const auto h = height();
@@ -119,6 +124,7 @@ protected:
             { static_cast<qreal>(playX + 5), 0.0 },
             { static_cast<qreal>(playX), 6.0 },
         };
+        p.setRenderHint(QPainter::Antialiasing);
         p.setBrush(QColor(220, 60, 60));
         p.setPen(Qt::NoPen);
         p.drawPolygon(tri, 3);
@@ -157,6 +163,7 @@ private:
     double mDuration{ 10.0 };
     double mPlayhead{ 0.0 };
     bool mDragging{};
+    int mLastPlayheadPx{ -1 };
     QVector<SequencerWindow::TrackInfo> mTracks;
 };
 
