@@ -20,6 +20,9 @@ public:
     void rebuild();
     bool hasSliderBindings() const;
 
+protected:
+    void showEvent(QShowEvent *event) override;
+
 private:
     struct SliderControl
     {
@@ -40,4 +43,5 @@ private:
     QLabel *mEmptyLabel{};
     QVector<SliderControl> mControls;
     bool mUpdating{};
+    bool mRebuildPending{};
 };
