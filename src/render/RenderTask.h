@@ -48,20 +48,18 @@ private:
     // 1. called per update in main thread
     virtual void prepare(bool itemsChanged, EvaluationType evaluationType) { }
 
-    // 2. called per update in render thread
+    // 2. called per update in render thread (configure, then render)
     virtual void configure() { }
-
-    // 3. called per update in main thread
-    virtual void configured() { }
-
-    // 4. called per update in render thread
     virtual void render() = 0;
 
-    // 5. called per update in main thread
+    // 3. called per update in main thread (after configure+render complete)
+    virtual void configured() { }
+
+    // 4. called per update in main thread
     void handleRendered();
     virtual void finish() { }
 
-    // 6. called once in render thread
+    // 5. called once in render thread
     virtual void release() { }
 
     RendererPtr mRenderer;

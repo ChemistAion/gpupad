@@ -27,19 +27,14 @@ public:
     GLContext context;
     QOffscreenSurface surface;
 
-    void handleConfigureTask(RenderTask *renderTask)
+    void handleExecuteTask(RenderTask *renderTask)
     {
         if (!std::exchange(mInitialized, true))
             initialize();
 
         renderTask->configure();
-        Q_EMIT taskConfigured();
-    }
-
-    void handleRenderTask(RenderTask *renderTask)
-    {
         renderTask->render();
-        Q_EMIT taskRendered();
+        Q_EMIT taskCompleted();
     }
 
     void handleReleaseTask(RenderTask *renderTask, void *userData)
@@ -62,8 +57,7 @@ public Q_SLOTS:
     }
 
 Q_SIGNALS:
-    void taskConfigured();
-    void taskRendered();
+    void taskCompleted();
 
 private:
     void initialize()
@@ -114,14 +108,10 @@ GLRenderer::GLRenderer(QObject *parent)
     mWorker->surface.moveToThread(&mThread);
     mWorker->moveToThread(&mThread);
 
-    connect(this, &GLRenderer::configureTask, mWorker.get(),
-        &Worker::handleConfigureTask);
-    connect(mWorker.get(), &Worker::taskConfigured, this,
-        &GLRenderer::handleTaskConfigured);
-    connect(this, &GLRenderer::renderTask, mWorker.get(),
-        &Worker::handleRenderTask);
-    connect(mWorker.get(), &Worker::taskRendered, this,
-        &GLRenderer::handleTaskRendered);
+    connect(this, &GLRenderer::executeTask, mWorker.get(),
+        &Worker::handleExecuteTask);
+    connect(mWorker.get(), &Worker::taskCompleted, this,
+        &GLRenderer::handleTaskCompleted);
     connect(this, &GLRenderer::releaseTask, mWorker.get(),
         &Worker::handleReleaseTask);
 
@@ -167,18 +157,12 @@ void GLRenderer::renderNextTask()
         return;
 
     mCurrentTask = mPendingTasks.takeFirst();
-    Q_EMIT configureTask(mCurrentTask, QPrivateSignal());
+    Q_EMIT executeTask(mCurrentTask, QPrivateSignal());
 }
 
-void GLRenderer::handleTaskConfigured()
+void GLRenderer::handleTaskCompleted()
 {
     mCurrentTask->configured();
-
-    Q_EMIT renderTask(mCurrentTask, QPrivateSignal());
-}
-
-void GLRenderer::handleTaskRendered()
-{
     auto currentTask = std::exchange(mCurrentTask, nullptr);
     currentTask->handleRendered();
 
