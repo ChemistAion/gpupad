@@ -193,6 +193,12 @@ void SynchronizeLogic::handleSessionRendered()
 
     if (mEvaluationMode != EvaluationMode::Paused && mRenderSession)
         Singletons::sessionModel().setActiveItems(mRenderSession->usedItems());
+
+    // Self-sustaining pipeline: immediately re-dispatch in Steady mode
+    // instead of waiting for the 1ms timer (which is delayed by paint events).
+    // The timer still fires but harmlessly coalesces (mUpdating == true).
+    if (mEvaluationMode == EvaluationMode::Steady)
+        evaluate(EvaluationType::Steady);
 }
 
 void SynchronizeLogic::handleFileChanged(const QString &fileName)

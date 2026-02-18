@@ -26,14 +26,12 @@ public:
     ktxVulkanDeviceInfo &ktxDeviceInfo();
 
 Q_SIGNALS:
-    void configureTask(RenderTask *renderTask, QPrivateSignal);
-    void renderTask(RenderTask *renderTask, QPrivateSignal);
+    void executeTask(RenderTask *renderTask, QPrivateSignal);
     void releaseTask(RenderTask *renderTask, void *userData, QPrivateSignal);
 
 private:
     class Worker;
-    void handleTaskConfigured();
-    void handleTaskRendered();
+    void handleTaskCompleted();
     void renderNextTask();
 
     QThread mThread;

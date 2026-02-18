@@ -80,32 +80,22 @@ class VKRenderer::Worker final : public QObject
 public:
     explicit Worker(VKRenderer *renderer) : mRenderer(*renderer) { }
 
-    void handleConfigureTask(RenderTask *renderTask)
+    void handleExecuteTask(RenderTask *renderTask)
     {
         try {
             if (!std::exchange(mInitialized, true))
                 initialize();
 
-            if (mDevice.isValid())
+            if (mDevice.isValid()) {
                 renderTask->configure();
+                renderTask->render();
+            }
         } catch (const std::exception &ex) {
             mMessages +=
                 MessageList::insert(0, MessageType::RenderingFailed, ex.what());
             shutdown();
         }
-        Q_EMIT taskConfigured();
-    }
-
-    void handleRenderTask(RenderTask *renderTask)
-    {
-        try {
-            if (mDevice.isValid())
-                renderTask->render();
-        } catch (const std::exception &ex) {
-            mMessages +=
-                MessageList::insert(0, MessageType::RenderingFailed, ex.what());
-        }
-        Q_EMIT taskRendered();
+        Q_EMIT taskCompleted();
     }
 
     void handleReleaseTask(RenderTask *renderTask, void *userData)
@@ -124,8 +114,7 @@ public Q_SLOTS:
     }
 
 Q_SIGNALS:
-    void taskConfigured();
-    void taskRendered();
+    void taskCompleted();
 
 private:
     void initialize()
@@ -269,14 +258,10 @@ VKRenderer::VKRenderer(QObject *parent)
 
     mWorker->moveToThread(&mThread);
 
-    connect(this, &VKRenderer::configureTask, mWorker.get(),
-        &Worker::handleConfigureTask);
-    connect(mWorker.get(), &Worker::taskConfigured, this,
-        &VKRenderer::handleTaskConfigured);
-    connect(this, &VKRenderer::renderTask, mWorker.get(),
-        &Worker::handleRenderTask);
-    connect(mWorker.get(), &Worker::taskRendered, this,
-        &VKRenderer::handleTaskRendered);
+    connect(this, &VKRenderer::executeTask, mWorker.get(),
+        &Worker::handleExecuteTask);
+    connect(mWorker.get(), &Worker::taskCompleted, this,
+        &VKRenderer::handleTaskCompleted);
     connect(this, &VKRenderer::releaseTask, mWorker.get(),
         &Worker::handleReleaseTask);
 
@@ -340,18 +325,12 @@ void VKRenderer::renderNextTask()
         return;
 
     mCurrentTask = mPendingTasks.takeFirst();
-    Q_EMIT configureTask(mCurrentTask, QPrivateSignal());
+    Q_EMIT executeTask(mCurrentTask, QPrivateSignal());
 }
 
-void VKRenderer::handleTaskConfigured()
+void VKRenderer::handleTaskCompleted()
 {
     mCurrentTask->configured();
-
-    Q_EMIT renderTask(mCurrentTask, QPrivateSignal());
-}
-
-void VKRenderer::handleTaskRendered()
-{
     auto currentTask = std::exchange(mCurrentTask, nullptr);
     currentTask->handleRendered();
 
