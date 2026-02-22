@@ -67,4 +67,4 @@ For offside experiments:
 - (MUST!) After meaningful changes, run relevant build/tests and iterate until they pass.
 - Do not create commits unless explicitly requested, work as locally, working changes untill we are happy (perhaps my explicit prompt about hat).
 - When asked to commit working changes, follow the requested structure and force-push afterward by default.
-
+- (MUST!) Commit messages should keep only the human author identity; do not add Co-authored-by trailers.
