@@ -32,7 +32,6 @@ class AppScriptObject final : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int frameIndex READ frameIndex CONSTANT)
-    Q_PROPERTY(double time READ time CONSTANT)
     Q_PROPERTY(QJSValue session READ session CONSTANT)
     Q_PROPERTY(QJSValue mouse READ mouse CONSTANT)
     Q_PROPERTY(QJSValue keyboard READ keyboard CONSTANT)
@@ -42,7 +41,6 @@ public:
     ~AppScriptObject();
 
     int frameIndex() const { return mFrameIndex; }
-    double time() const { return mTime; }
     QJSValue session();
     QJSValue mouse() { return mMouseProperty; }
     QJSValue keyboard() { return mKeyboardProperty; }
@@ -58,7 +56,7 @@ public:
     Q_INVOKABLE QJSValue readTextFile(QString fileName);
 
     void deregisterEditorScriptObject(EditorScriptObject *object);
-    void update(double time);
+    void update();
     bool usesMouseState() const;
     bool usesKeyboardState() const;
     bool usesViewportSize(const QString &fileName) const;
@@ -80,7 +78,6 @@ private:
     QJSValue mMouseProperty;
     QJSValue mKeyboardProperty;
     int mFrameIndex{};
-    double mTime{};
     QMap<QString, QJSValue> mLoadedLibraries;
     AppScriptObject_MainThreadCalls *mMainThreadCalls{};
 };
