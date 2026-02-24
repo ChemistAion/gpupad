@@ -2,3 +2,6 @@
 	path = libs/KDGpu
 	url = https://github.com/houmain/KDGpu
 	branch = main
+[submodule "references/fragcoord"]
+	path = references/fragcoord
+	url = https://github.com/ChemistAion/fragcoord.git
