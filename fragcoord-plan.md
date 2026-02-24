@@ -2,6 +2,19 @@
 
 > **Constraint**: Zero changes to GPUpad's codebase. The feature is delivered entirely as a custom action (`extra/actions/Inspector/`) using JS scripting, QML UI, and GLSL shaders.
 
+## Progress
+
+| Stage | Status | Notes |
+|-------|--------|-------|
+| 1 — Scaffolding & expression render | ✅ **DONE** | `script.js`, `ui.qml`, `attributeless.vs` — expression renders to RGBA32F FBO |
+| 2 — Shader rewrite engine | 🔄 **IN PROGRESS** | |
+| 3 — Histogram compute pass | ⬜ pending | |
+| 4 — Composite display shader | ⬜ pending | |
+| 5 — QML inspector panel | ⬜ pending | |
+| 6 — Per-pixel inspection | ⬜ pending | |
+| 7 — Multi-shader support | ⬜ pending | |
+| 8 — Polish & docs | ⬜ pending | |
+
 ---
 
 ## Architectural Summary
