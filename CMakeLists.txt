@@ -412,6 +412,18 @@ else()
         POST_EXCLUDE_REGEXES ".*system32/.*\\.dll"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+
+    # Deploy Qt runtime into the build output for VS debugging.
+    if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND "${QT_BIN_DIR}/windeployqt.exe"
+                --$<IF:$<CONFIG:Debug>,debug,release>
+                --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/extra/qml"
+                --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler
+                "$<TARGET_FILE:${PROJECT_NAME}>"
+            VERBATIM
+        )
+    endif()
 endif()
 
 # package -------------------------

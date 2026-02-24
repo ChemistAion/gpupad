@@ -4,3 +4,4 @@
 /vcpkg/
 /*.user
 /extra/samples/**/*.gpjs.state
+/.build
