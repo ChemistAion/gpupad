@@ -242,6 +242,19 @@ if(WIN32)
 endif()
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES} ${HEADERS})
 
+if(MSVC)
+    file(GLOB_RECURSE EXTRA_FILES
+        LIST_DIRECTORIES false
+        CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/extra/*)
+    set_source_files_properties(${EXTRA_FILES} PROPERTIES
+        HEADER_FILE_ONLY TRUE
+        VS_TOOL_OVERRIDE "None")
+    add_custom_target(gpupad_extra_files SOURCES ${EXTRA_FILES})
+    source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/extra PREFIX "extra" FILES ${EXTRA_FILES})
+    set_target_properties(gpupad_extra_files PROPERTIES FOLDER "Solution Items")
+endif()
+
 if (MSVC)
     add_compile_options(/W3)
 else()
