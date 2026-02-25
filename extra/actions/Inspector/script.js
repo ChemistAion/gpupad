@@ -613,6 +613,34 @@ class Inspector {
     return { ok: true, type, rangeHint }
   }
 
+  // ── Uniform helpers (called from QML) ───────────────────────────────────
+
+  setMappingMode(index) {
+    if (this._compModeBind)
+      app.session.findItem(this._compModeBind.id).values = [String(index)]
+  }
+
+  setMappingRange(lo, hi) {
+    if (this._compRangeBind)
+      app.session.findItem(this._compRangeBind.id).values = [String(lo), String(hi)]
+  }
+
+  setChannelMask(r, g, b, a) {
+    if (this._compChanBind)
+      app.session.findItem(this._compChanBind.id).values = [
+        r ? '1' : '0', g ? '1' : '0', b ? '1' : '0', a ? '1' : '0']
+  }
+
+  setHighlightOOR(on) {
+    if (this._compOORBind)
+      app.session.findItem(this._compOORBind.id).values = [on ? '1' : '0']
+  }
+
+  setHistogramHeight(frac) {
+    if (this._compHistHBind)
+      app.session.findItem(this._compHistHBind.id).values = [String(frac)]
+  }
+
   cleanup() {
     if (this._group) app.session.deleteItem(this._group)
     this._group = this._texture = this._target = this._program = this._call = null
