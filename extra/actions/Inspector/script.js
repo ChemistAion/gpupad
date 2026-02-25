@@ -39,12 +39,23 @@ class Inspector {
     this._histBufferBind  = null
     this._histClearCall   = null
     this._histComputeCall = null
+    // Composite display pipeline
+    this._compTexture     = null
+    this._compTarget      = null
+    this._compProgram     = null
+    this._compSamplerBind = null
+    this._compModeBind    = null
+    this._compRangeBind   = null
+    this._compChanBind    = null
+    this._compOORBind     = null
+    this._compHistHBind   = null
+    this._compCall        = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''
   }
 
-  // ── Validation ─────────────────────────────────────────────────────────────
+  // ── Validation
 
   validate(expr) {
     const e = expr.trim()
@@ -299,6 +310,16 @@ class Inspector {
     this._histBufferBind = null
     this._histClearCall = null
     this._histComputeCall = null
+    this._compTexture = null
+    this._compTarget = null
+    this._compProgram = null
+    this._compSamplerBind = null
+    this._compModeBind = null
+    this._compRangeBind = null
+    this._compChanBind = null
+    this._compOORBind = null
+    this._compHistHBind = null
+    this._compCall = null
     return this._group
   }
 
@@ -408,9 +429,7 @@ class Inspector {
       this._call.programId = this._program.id
     }
 
-    app.session.openEditor(this._texture)
-
-    // ── Histogram compute pipeline ──────────────────────────────────────────
+    // ── Histogram compute pipeline
 
     if (!this._histBuffer) {
       this._histBuffer = app.session.insertItem(group, {
@@ -485,6 +504,103 @@ class Inspector {
       })
     }
 
+    // ── Composite display pipeline ────────────────────────────────────────────
+
+    if (!this._compTexture) {
+      this._compTexture = app.session.insertItem(group, {
+        type: 'Texture', name: 'InspectorDisplay', format: 'RGBA8',
+        width: this._texture.width, height: this._texture.height,
+        target: 'Target2D', samples: 1, flipVertically: false
+      })
+    }
+
+    if (!this._compTarget) {
+      this._compTarget = app.session.insertItem(group, {
+        type: 'Target', name: 'CompositeTarget',
+        cullMode: 'NoCulling', frontFace: 'CCW',
+        items: [{
+          type: 'Attachment', name: 'Color',
+          textureId: this._compTexture.id, level: 0
+        }]
+      })
+    }
+
+    if (!this._compProgram) {
+      this._compProgram = app.session.insertItem(group, {
+        type: 'Program', name: 'CompositeProgram',
+        items: [
+          { type: 'Shader', shaderType: 'Vertex',
+            fileName: 'attributeless.vs', language: 'GLSL' },
+          { type: 'Shader', shaderType: 'Fragment',
+            fileName: 'composite.fs', language: 'GLSL' }
+        ]
+      })
+    }
+
+    if (!this._compSamplerBind) {
+      this._compSamplerBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uInspectorSampler',
+        bindingType: 'Sampler',
+        textureId: this._texture.id,
+        minFilter: 'Nearest', magFilter: 'Nearest'
+      })
+    }
+
+    if (!this._compModeBind) {
+      this._compModeBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uMappingMode',
+        bindingType: 'Uniform', editor: 'Expression',
+        values: ['0']
+      })
+    }
+
+    if (!this._compRangeBind) {
+      const rMin = rangeHint ? String(rangeHint.min) : '0.0'
+      const rMax = rangeHint ? String(rangeHint.max) : '1.0'
+      this._compRangeBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uMappingRange',
+        bindingType: 'Uniform', editor: 'Expression2',
+        values: [rMin, rMax]
+      })
+    }
+
+    if (!this._compChanBind) {
+      this._compChanBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uChannelMask',
+        bindingType: 'Uniform', editor: 'Expression4',
+        values: ['1', '1', '1', '0']
+      })
+    }
+
+    if (!this._compOORBind) {
+      this._compOORBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uHighlightOOR',
+        bindingType: 'Uniform', editor: 'Expression',
+        values: ['0']
+      })
+    }
+
+    if (!this._compHistHBind) {
+      this._compHistHBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uHistogramHeight',
+        bindingType: 'Uniform', editor: 'Expression',
+        values: ['0.2']
+      })
+    }
+
+    if (!this._compCall) {
+      this._compCall = app.session.insertItem(group, {
+        type: 'Call', name: 'CompositeDraw',
+        callType: 'Draw', checked: true,
+        executeOn: 'EveryEvaluation',
+        programId: this._compProgram.id, targetId: this._compTarget.id,
+        primitiveType: 'TriangleStrip',
+        count: '4', first: '0', instanceCount: '1', vertexStreamId: 0
+      })
+    }
+
+    app.session.openEditor(this._compTexture)
+
     this.enabled    = true
     this.expression = expression
     this.lastType   = type
@@ -496,6 +612,10 @@ class Inspector {
     this._group = this._texture = this._target = this._program = this._call = null
     this._histBuffer = this._histProgram = this._histImageBind = null
     this._histBufferBind = this._histClearCall = this._histComputeCall = null
+    this._compTexture = this._compTarget = this._compProgram = null
+    this._compSamplerBind = null
+    this._compModeBind = this._compRangeBind = this._compChanBind = null
+    this._compOORBind = this._compHistHBind = this._compCall = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''

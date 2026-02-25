@@ -1,4 +1,4 @@
-#version 330
+#version 430
 
 const vec2 pos[4] = vec2[](
   vec2(-1,-1),
