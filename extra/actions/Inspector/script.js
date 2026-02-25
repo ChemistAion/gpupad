@@ -277,7 +277,8 @@ class Inspector {
     const bindings = []
     const seen = new Set()
     let current = app.session.getParentItem(item)
-    while (current) {
+    let _depth = 0
+    while (current && ++_depth < 50) {
       if (current.items) {
         for (const child of current.items) {
           if (child.type === 'Binding' && !seen.has(child.name)) {
@@ -450,6 +451,8 @@ class Inspector {
     this._compOORBind = null
     this._compHistHBind = null
     this._compCall = null
+    this._mouseFragBind = null
+    this._forwardedBindings = []
     return this._group
   }
 
