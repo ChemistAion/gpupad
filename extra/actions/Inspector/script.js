@@ -32,6 +32,13 @@ class Inspector {
     this._target  = null
     this._program = null
     this._call    = null
+    // Histogram compute pipeline
+    this._histBuffer      = null
+    this._histProgram     = null
+    this._histImageBind   = null
+    this._histBufferBind  = null
+    this._histClearCall   = null
+    this._histComputeCall = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''
@@ -286,6 +293,12 @@ class Inspector {
     this._target  = null
     this._program = null
     this._call    = null
+    this._histBuffer = null
+    this._histProgram = null
+    this._histImageBind = null
+    this._histBufferBind = null
+    this._histClearCall = null
+    this._histComputeCall = null
     return this._group
   }
 
@@ -397,6 +410,81 @@ class Inspector {
 
     app.session.openEditor(this._texture)
 
+    // ── Histogram compute pipeline ──────────────────────────────────────────
+
+    if (!this._histBuffer) {
+      this._histBuffer = app.session.insertItem(group, {
+        type: 'Buffer', name: 'HistogramSSBO',
+        items: [{
+          type: 'Block', name: 'HistogramBlock', offset: '0', rowCount: '1',
+          items: [
+            { type: 'Field', name: 'binsR',       dataType: 'Uint32', count: 128, padding: 0 },
+            { type: 'Field', name: 'binsG',       dataType: 'Uint32', count: 128, padding: 0 },
+            { type: 'Field', name: 'binsB',       dataType: 'Uint32', count: 128, padding: 0 },
+            { type: 'Field', name: 'binsA',       dataType: 'Uint32', count: 128, padding: 0 },
+            { type: 'Field', name: 'uDataMin',    dataType: 'Uint32', count: 1, padding: 0 },
+            { type: 'Field', name: 'uDataMax',    dataType: 'Uint32', count: 1, padding: 0 },
+            { type: 'Field', name: 'uAutoMin',    dataType: 'Uint32', count: 1, padding: 0 },
+            { type: 'Field', name: 'uAutoMax',    dataType: 'Uint32', count: 1, padding: 0 },
+            { type: 'Field', name: 'totalPixels', dataType: 'Uint32', count: 1, padding: 0 }
+          ]
+        }]
+      })
+    }
+
+    if (!this._histProgram) {
+      this._histProgram = app.session.insertItem(group, {
+        type: 'Program', name: 'HistogramProgram',
+        items: [{
+          type: 'Shader', shaderType: 'Compute',
+          fileName: 'histogram.comp', language: 'GLSL'
+        }]
+      })
+    }
+
+    if (!this._histImageBind) {
+      this._histImageBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uInspectorTex',
+        bindingType: 'Image',
+        textureId: this._texture.id,
+        imageFormat: 'Internal',
+        level: 0, layer: 0
+      })
+    }
+
+    if (!this._histBufferBind) {
+      this._histBufferBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'HistogramBuffer',
+        bindingType: 'Buffer',
+        bufferId: this._histBuffer.id
+      })
+    }
+
+    if (!this._histClearCall) {
+      this._histClearCall = app.session.insertItem(group, {
+        type: 'Call', name: 'HistogramClear',
+        callType: 'ClearBuffer', checked: true,
+        executeOn: 'EveryEvaluation',
+        bufferId: this._histBuffer.id
+      })
+    }
+
+    if (!this._histComputeCall) {
+      // NOTE: parseInt handles fixed-size textures; viewport-expression sizes
+      // fall back to 1280x720 (shader bounds-checks handle overshoot)
+      const texW = parseInt(this._texture.width) || 1280
+      const texH = parseInt(this._texture.height) || 720
+      this._histComputeCall = app.session.insertItem(group, {
+        type: 'Call', name: 'HistogramCompute',
+        callType: 'Compute', checked: true,
+        executeOn: 'EveryEvaluation',
+        programId: this._histProgram.id,
+        workGroupsX: String(Math.ceil(texW / 16)),
+        workGroupsY: String(Math.ceil(texH / 16)),
+        workGroupsZ: '1'
+      })
+    }
+
     this.enabled    = true
     this.expression = expression
     this.lastType   = type
@@ -406,6 +494,8 @@ class Inspector {
   cleanup() {
     if (this._group) app.session.deleteItem(this._group)
     this._group = this._texture = this._target = this._program = this._call = null
+    this._histBuffer = this._histProgram = this._histImageBind = null
+    this._histBufferBind = this._histClearCall = this._histComputeCall = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''

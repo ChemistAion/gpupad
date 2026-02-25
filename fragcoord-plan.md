@@ -8,8 +8,8 @@
 |-------|--------|-------|
 | 1 — Scaffolding & expression render | ✅ **DONE** | `script.js`, `ui.qml`, `attributeless.vs` — expression renders to RGBA32F FBO |
 | 2 — Shader rewrite engine | ✅ **DONE** | Validation, type inference, vec4 coercion, multi-entry rewrite (main + mainImage), range hints |
-| 3 — Histogram compute pass | 🔄 **IN PROGRESS** | |
-| 4 — Composite display shader | ⬜ pending | |
+| 3 — Histogram compute pass | ✅ **DONE** | `histogram.comp` SSBO, ClearBuffer, atomicMin/Max with CAS sentinels; `script.js` pipeline wiring |
+| 4 — Composite display shader | 🔄 **IN PROGRESS** | |
 | 5 — QML inspector panel | ⬜ pending | |
 | 6 — Per-pixel inspection | ⬜ pending | |
 | 7 — Multi-shader support | ⬜ pending | |

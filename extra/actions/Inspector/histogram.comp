@@ -1,0 +1,87 @@
+#version 430
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba32f) readonly uniform image2D uInspectorTex;
+
+// SSBO: 128 bins x 4 channels + statistics = 517 uints (2068 bytes)
+layout(std430) buffer HistogramBuffer {
+    uint binsR[128];
+    uint binsG[128];
+    uint binsB[128];
+    uint binsA[128];
+    uint uDataMin;   // float encoded as sortable uint
+    uint uDataMax;   // float encoded as sortable uint
+    uint uAutoMin;   // 1% quantile (sortable uint), reserved for future pass
+    uint uAutoMax;   // 99% quantile (sortable uint), reserved for future pass
+    uint totalPixels;
+};
+
+// Encode a float as a sortable uint for atomicMin/Max.
+// Positive floats: IEEE 754 bit pattern is already ordered.
+// Negative floats: flip all bits so that more-negative = smaller uint.
+uint floatToSortableUint(float v) {
+    uint bits = floatBitsToUint(v);
+    return (bits & 0x80000000u) != 0u
+        ? ~bits
+        : bits | 0x80000000u;
+}
+
+float sortableUintToFloat(uint u) {
+    uint bits = (u & 0x80000000u) != 0u
+        ? u & ~0x80000000u
+        : ~u;
+    return uintBitsToFloat(bits);
+}
+
+void main() {
+    ivec2 size = imageSize(uInspectorTex);
+    ivec2 pos  = ivec2(gl_GlobalInvocationID.xy);
+
+    if (pos.x >= size.x || pos.y >= size.y)
+        return;
+
+    // Initialize min/max sentinels after ClearBuffer zeros everything.
+    // CAS: only the first thread to find 0 succeeds; rest are no-ops.
+    // +FLT_MAX sortable = 0xFF7FFFFF, -FLT_MAX sortable = 0x00800000
+    atomicCompSwap(uDataMin, 0u, 0xFF7FFFFFu);
+    atomicCompSwap(uDataMax, 0u, 0x00800000u);
+
+    vec4 texel = imageLoad(uInspectorTex, pos);
+
+    // Skip NaN / Inf pixels
+    if (any(isnan(texel)) || any(isinf(texel)))
+        return;
+
+    // Update global min/max (across all channels)
+    float vmin = min(min(texel.r, texel.g), min(texel.b, texel.a));
+    float vmax = max(max(texel.r, texel.g), max(texel.b, texel.a));
+    atomicMin(uDataMin, floatToSortableUint(vmin));
+    atomicMax(uDataMax, floatToSortableUint(vmax));
+
+    // Read current range for binning (may be partial within a single frame;
+    // acceptable for visualization -- histogram shape converges quickly)
+    float rangeMin = sortableUintToFloat(uDataMin);
+    float rangeMax = sortableUintToFloat(uDataMax);
+    float range    = rangeMax - rangeMin;
+
+    // Degenerate range: everything in center bin
+    if (range < 1e-20) {
+        atomicAdd(binsR[64], 1u);
+        atomicAdd(binsG[64], 1u);
+        atomicAdd(binsB[64], 1u);
+        atomicAdd(binsA[64], 1u);
+    } else {
+        float inv = 127.0 / range;
+        uint binR = clamp(uint((texel.r - rangeMin) * inv), 0u, 127u);
+        uint binG = clamp(uint((texel.g - rangeMin) * inv), 0u, 127u);
+        uint binB = clamp(uint((texel.b - rangeMin) * inv), 0u, 127u);
+        uint binA = clamp(uint((texel.a - rangeMin) * inv), 0u, 127u);
+        atomicAdd(binsR[binR], 1u);
+        atomicAdd(binsG[binG], 1u);
+        atomicAdd(binsB[binB], 1u);
+        atomicAdd(binsA[binA], 1u);
+    }
+
+    atomicAdd(totalPixels, 1u);
+}
