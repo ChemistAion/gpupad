@@ -50,6 +50,8 @@ class Inspector {
     this._compOORBind     = null
     this._compHistHBind   = null
     this._compCall        = null
+    // Per-pixel inspection
+    this._mouseFragBind    = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''
@@ -213,6 +215,36 @@ class Inspector {
     )
   }
 
+
+  // Inject printf + uMouseFragCoord uniform into the already-rewritten shader.
+  // Adds a guarded printf at the end of main() so GPUpad's output pane shows
+  // the RGBA value under the mouse cursor.
+  injectPrintf(rewrittenSrc, expression, outVar) {
+    const mainIdx = rewrittenSrc.search(/\bvoid\s+main\s*\(\s*\)/)
+    if (mainIdx === -1) return rewrittenSrc
+
+    const prefix = rewrittenSrc.slice(0, mainIdx)
+    const rest   = rewrittenSrc.slice(mainIdx)
+
+    // Add uniform declaration if not already present
+    const uniformDecl = prefix.includes('uMouseFragCoord') ? '' :
+      'uniform vec2 uMouseFragCoord;\n\n'
+
+    // Find closing } of main() and insert printf block before it
+    const lastBrace = rest.lastIndexOf('}')
+    if (lastBrace === -1) return prefix + uniformDecl + rest
+
+    // Escape the expression string for use inside printf literal
+    const safeExpr = expression.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+    const printfBlock =
+      `#if defined(GPUPAD)\n` +
+      `  if (gl_FragCoord.xy == uMouseFragCoord)\n` +
+      `    printf("${safeExpr} @ %i = %f", ivec2(uMouseFragCoord), ${outVar});\n` +
+      `#endif\n`
+
+    return prefix + uniformDecl + rest.slice(0, lastBrace) + printfBlock + rest.slice(lastBrace)
+  }
   // ── Shader targeting ────────────────────────────────────────────────────────
 
   // Determine which linked fragment shader to rewrite for a given expression.
@@ -352,25 +384,31 @@ class Inspector {
     const hasMain      = /\bvoid\s+main\s*\(\s*\)/.test(targetSrc)
     const hasMainImage = /\bvoid\s+mainImage\s*\(/.test(targetSrc)
 
-    let rewritten
+    let rewritten, outVar
     if (hasMain) {
-      rewritten = this.rewriteMain(targetSrc, this.detectOutVar(targetSrc), vec4Expr)
+      outVar = this.detectOutVar(targetSrc)
+      rewritten = this.rewriteMain(targetSrc, outVar, vec4Expr)
     } else if (hasMainImage) {
-      rewritten = this.rewriteMainImage(
-        targetSrc, this.detectMainImageOutVar(targetSrc), vec4Expr)
+      outVar = this.detectMainImageOutVar(targetSrc)
+      rewritten = this.rewriteMainImage(targetSrc, outVar, vec4Expr)
       if (!rewritten) {
         const mainIdx = this._findMainShaderIdx(shaders, sources)
         if (mainIdx !== -1) {
           const src2 = sources[mainIdx]
-          rewritten  = this.rewriteMain(src2, this.detectOutVar(src2), vec4Expr)
+          outVar    = this.detectOutVar(src2)
+          rewritten = this.rewriteMain(src2, outVar, vec4Expr)
         }
       }
     } else {
-      rewritten = this.rewriteMain(targetSrc, this.detectOutVar(targetSrc), vec4Expr)
+      outVar = this.detectOutVar(targetSrc)
+      rewritten = this.rewriteMain(targetSrc, outVar, vec4Expr)
     }
 
     if (!rewritten)
       return { ok: false, error: 'Cannot locate entry point in shader' }
+
+    // Inject printf for per-pixel readback under the mouse cursor
+    rewritten = this.injectPrintf(rewritten, expression, outVar)
 
     const group = this.ensureGroup()
 
@@ -594,6 +632,14 @@ class Inspector {
       })
     }
 
+    if (!this._mouseFragBind) {
+      this._mouseFragBind = app.session.insertItem(group, {
+        type: 'Binding', name: 'uMouseFragCoord',
+        bindingType: 'Uniform', editor: 'Expression',
+        values: ['app.mouse.fragCoord']
+      })
+    }
+
     if (!this._compCall) {
       this._compCall = app.session.insertItem(group, {
         type: 'Call', name: 'CompositeDraw',
@@ -650,6 +696,7 @@ class Inspector {
     this._compSamplerBind = null
     this._compModeBind = this._compRangeBind = this._compChanBind = null
     this._compOORBind = this._compHistHBind = this._compCall = null
+    this._mouseFragBind = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''

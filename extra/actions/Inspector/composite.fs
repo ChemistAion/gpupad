@@ -23,6 +23,7 @@ uniform vec2  uMappingRange;    // (min, max)
 uniform ivec4 uChannelMask;     // which channels to draw in histogram
 uniform int   uHighlightOOR;   // out-of-range checkerboard enable
 uniform float uHistogramHeight; // fraction of viewport for histogram strip
+uniform vec2  uMouseFragCoord;  // mouse position for crosshair + printf
 
 // ── Sortable-uint → float decode ──────────────────────────────────────────
 
@@ -164,5 +165,14 @@ void main() {
         mapped = checkerboard(fragCoord, mapped, vmin, lo, hi);
 
         fragColor = vec4(mapped, 1.0);
+    }
+
+    // ── Crosshair at mouse position ──
+    vec2 mouseUV = uMouseFragCoord / texSize;
+    float pxW = 1.0 / texSize.x;
+    float pxH = 1.0 / texSize.y;
+    if (abs(vTexCoords.x - mouseUV.x) < pxW ||
+        abs(vTexCoords.y - mouseUV.y) < pxH) {
+        fragColor.rgb = vec3(1.0) - fragColor.rgb;
     }
 }
