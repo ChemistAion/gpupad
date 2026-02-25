@@ -12,6 +12,7 @@ Pane {
   property bool chG: true
   property bool chB: true
   property bool chA: false
+  property var exprHistory: []
 
   // ?? Layout ????????????????????????????????????????????????????????????????
   ColumnLayout {
@@ -37,6 +38,47 @@ Pane {
       Button {
         text: "Apply"
         onClicked: root.applyExpr()
+      }
+    }
+
+    // Presets
+    Flow {
+      Layout.fillWidth: true
+      spacing: 4
+      Repeater {
+        model: [
+          { label: "UV", expr: "gl_FragCoord.xy / iResolution.xy" },
+          { label: "Depth", expr: "gl_FragDepth" },
+          { label: "|N|", expr: "length(normal)" },
+          { label: "abs(…)", expr: "abs(%)" }
+        ]
+        delegate: Button {
+          text: modelData.label
+          implicitWidth: implicitContentWidth + 16
+          implicitHeight: 24
+          font.pixelSize: 11
+          onClicked: {
+            let e = modelData.expr
+            if (e.includes("%")) {
+              const cur = exprField.text.trim()
+              e = cur ? e.replace("%", cur) : e.replace("%", "x")
+            }
+            exprField.text = e
+            root.applyExpr()
+          }
+        }
+      }
+    }
+
+    // History
+    ComboBox {
+      id: historyBox
+      Layout.fillWidth: true
+      model: root.exprHistory
+      displayText: count > 0 ? "History (" + count + ")" : "No history"
+      onActivated: function(index) {
+        exprField.text = root.exprHistory[index]
+        root.applyExpr()
       }
     }
 
@@ -229,6 +271,7 @@ Pane {
         rangeMax.value = Math.round(result.rangeHint.max * 1000)
       }
       statusLabel.text = msg
+      root.pushHistory(expr)
     } else {
       statusLabel.text = "?  " + result.error
     }
@@ -240,6 +283,13 @@ Pane {
 
   function pushChannels() {
     inspector.setChannelMask(root.chR, root.chG, root.chB, root.chA)
+  }
+
+  function pushHistory(expr) {
+    let h = root.exprHistory.filter(function(e) { return e !== expr })
+    h.unshift(expr)
+    if (h.length > 20) h = h.slice(0, 20)
+    root.exprHistory = h
   }
 
   function refreshCallList() {
