@@ -105,6 +105,12 @@ class Inspector {
     )
     if (vm) return vm[1]
 
+    // Function return type: TYPE funcName(  e.g. vec3 myHelper(
+    const fm = combined.match(
+      new RegExp(`\\b(float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${esc}\\s*\\(`)
+    )
+    if (fm) return fm[1]
+
     return 'float'
   }
 
@@ -136,12 +142,18 @@ class Inspector {
   // ── Shader rewrite ──────────────────────────────────────────────────────────
 
   detectOutVar(src) {
-    const m = src.match(/\bout\s+vec4\s+(\w+)\s*;/)
+    // layout(location=0) out vec4 name;  or  out vec4 name;
+    const m = src.match(/(?:layout\s*\([^)]*\)\s*)?out\s+vec4\s+(\w+)\s*;/)
+    return m ? m[1] : 'fragColor'
+  }
+
+  // For mainImage(out vec4 <name>, ...) style shaders
+  detectMainImageOutVar(src) {
+    const m = src.match(/\bvoid\s+mainImage\s*\(\s*out\s+vec4\s+(\w+)/)
     return m ? m[1] : 'fragColor'
   }
 
   // Replace void main() and everything after it with the inspector body.
-  // Preserves the preamble (version, uniforms, helpers, forward decls).
   rewriteMain(src, outVar, vec4Expr) {
     const idx = src.search(/\bvoid\s+main\s*\(\s*\)/)
     if (idx === -1) return null
@@ -149,6 +161,96 @@ class Inspector {
       src.slice(0, idx) +
       `void main() {\n  ${outVar} = ${vec4Expr};\n}\n`
     )
+  }
+
+  // Inject inspector output right before the closing brace of mainImage().
+  // All locals are in scope there, so any local variable can be inspected.
+  rewriteMainImage(src, outVar, vec4Expr) {
+    const funcMatch = src.match(/\bvoid\s+mainImage\s*\(/)
+    if (!funcMatch) return null
+
+    // Skip parameter list to find the function body '{'
+    let pos = funcMatch.index + funcMatch[0].length
+    let parenDepth = 1
+    while (pos < src.length && parenDepth > 0) {
+      if      (src[pos] === '(') parenDepth++
+      else if (src[pos] === ')') parenDepth--
+      pos++
+    }
+    while (pos < src.length && src[pos] !== '{') pos++
+    if (pos >= src.length) return null
+
+    // Find matching closing brace
+    let depth = 0, bodyEnd = -1
+    for (let i = pos; i < src.length; i++) {
+      if      (src[i] === '{') depth++
+      else if (src[i] === '}') { if (--depth === 0) { bodyEnd = i; break } }
+    }
+    if (bodyEnd === -1) return null
+
+    return (
+      src.slice(0, bodyEnd) +
+      `  ${outVar} = ${vec4Expr};\n` +
+      src.slice(bodyEnd)
+    )
+  }
+
+  // ── Shader targeting ────────────────────────────────────────────────────────
+
+  // Determine which linked fragment shader to rewrite for a given expression.
+  // Simple identifiers: search each shader for a local variable declaration.
+  // Complex expressions / built-ins: always use the shader that has void main().
+  findExpressionShader(expr, shaders, sources) {
+    const e = expr.trim()
+
+    // Extract base identifier (before any swizzle, operator, or call)
+    const baseMatch = e.match(/^(\w+)/)
+    const base = baseMatch ? baseMatch[1] : null
+
+    // GLSL built-ins (gl_*) and expressions without a simple base → main() shader
+    if (!base || /^gl_/.test(base))
+      return this._findMainShaderIdx(shaders, sources)
+
+    // Search each fragment shader for a local-variable declaration of `base`
+    const localRe = new RegExp(
+      `\\b(float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${escapeRegex(base)}\\s*[=;,)]`
+    )
+    for (let i = 0; i < shaders.length; i++) {
+      if (shaders[i].shaderType !== 'Fragment') continue
+      if (localRe.test(sources[i])) return i
+    }
+
+    // Not a local — use main() shader (handles uniforms, built-ins, functions)
+    return this._findMainShaderIdx(shaders, sources)
+  }
+
+  _findMainShaderIdx(shaders, sources) {
+    const idx = shaders.findIndex(
+      (s, i) => s.shaderType === 'Fragment' && /\bvoid\s+main\s*\(\s*\)/.test(sources[i])
+    )
+    return idx !== -1 ? idx : shaders.findIndex(s => s.shaderType === 'Fragment')
+  }
+
+  // ── Range hint ──────────────────────────────────────────────────────────────
+
+  // Scan shader sources for  // [min, max]  near the base identifier.
+  // Returns { min, max } or null.
+  parseRangeHint(expr, sources) {
+    const baseMatch = expr.trim().match(/^(\w+)/)
+    if (!baseMatch) return null
+    const nameRe   = new RegExp(`\\b${escapeRegex(baseMatch[1])}\\b`)
+    const rangeRe  = /\/\/\s*\[\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\]/
+    for (const src of sources) {
+      for (const line of src.split(/\r?\n/)) {
+        if (!nameRe.test(line)) continue
+        const m = line.match(rangeRe)
+        if (m) {
+          const min = parseFloat(m[1]), max = parseFloat(m[2])
+          if (!isNaN(min) && !isNaN(max) && max >= min) return { min, max }
+        }
+      }
+    }
+    return null
   }
 
   // ── Session helpers ─────────────────────────────────────────────────────────
@@ -197,28 +299,44 @@ class Inspector {
     if (!program)
       return { ok: false, error: 'No active Draw call found in session' }
 
-    // Collect all shaders; read fragment sources; find the one with void main()
+    // Collect all shaders; read fragment sources
     const shaders = program.items.filter(s => s.type === 'Shader')
     const sources = shaders.map(s =>
       (s.shaderType !== 'Vertex' && s.fileName)
         ? (app.readTextFile(s.fileName) || '') : ''
     )
 
-    let mainIdx = shaders.findIndex(
-      (s, i) => s.shaderType === 'Fragment' && /\bvoid\s+main\s*\(\s*\)/.test(sources[i])
-    )
-    if (mainIdx === -1)
-      mainIdx = shaders.findIndex(s => s.shaderType === 'Fragment')
-    if (mainIdx === -1)
+    // Find the best-matching shader for this expression
+    const targetIdx = this.findExpressionShader(expression, shaders, sources)
+    if (targetIdx === -1)
       return { ok: false, error: 'No Fragment shader found in program' }
 
-    const mainSrc   = sources[mainIdx]
-    const type      = this.inferType(expression, sources)
-    const vec4Expr  = this.coerce(expression, type)
-    const outVar    = this.detectOutVar(mainSrc)
-    const rewritten = this.rewriteMain(mainSrc, outVar, vec4Expr)
+    const targetSrc    = sources[targetIdx]
+    const type         = this.inferType(expression, sources)
+    const vec4Expr     = this.coerce(expression, type)
+    const rangeHint    = this.parseRangeHint(expression, sources)
+    const hasMain      = /\bvoid\s+main\s*\(\s*\)/.test(targetSrc)
+    const hasMainImage = /\bvoid\s+mainImage\s*\(/.test(targetSrc)
+
+    let rewritten
+    if (hasMain) {
+      rewritten = this.rewriteMain(targetSrc, this.detectOutVar(targetSrc), vec4Expr)
+    } else if (hasMainImage) {
+      rewritten = this.rewriteMainImage(
+        targetSrc, this.detectMainImageOutVar(targetSrc), vec4Expr)
+      if (!rewritten) {
+        const mainIdx = this._findMainShaderIdx(shaders, sources)
+        if (mainIdx !== -1) {
+          const src2 = sources[mainIdx]
+          rewritten  = this.rewriteMain(src2, this.detectOutVar(src2), vec4Expr)
+        }
+      }
+    } else {
+      rewritten = this.rewriteMain(targetSrc, this.detectOutVar(targetSrc), vec4Expr)
+    }
+
     if (!rewritten)
-      return { ok: false, error: 'Cannot locate void main() in shader' }
+      return { ok: false, error: 'Cannot locate entry point in shader' }
 
     const group = this.ensureGroup()
 
@@ -262,7 +380,7 @@ class Inspector {
         fileName: s.fileName, language: s.language
       }))
     })
-    app.session.setShaderSource(this._program.items[mainIdx], rewritten)
+    app.session.setShaderSource(this._program.items[targetIdx], rewritten)
 
     // Draw call
     if (!this._call) {
@@ -282,7 +400,7 @@ class Inspector {
     this.enabled    = true
     this.expression = expression
     this.lastType   = type
-    return { ok: true, type }
+    return { ok: true, type, rangeHint }
   }
 
   cleanup() {

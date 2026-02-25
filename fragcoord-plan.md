@@ -7,8 +7,8 @@
 | Stage | Status | Notes |
 |-------|--------|-------|
 | 1 — Scaffolding & expression render | ✅ **DONE** | `script.js`, `ui.qml`, `attributeless.vs` — expression renders to RGBA32F FBO |
-| 2 — Shader rewrite engine | 🔄 **IN PROGRESS** | |
-| 3 — Histogram compute pass | ⬜ pending | |
+| 2 — Shader rewrite engine | ✅ **DONE** | Validation, type inference, vec4 coercion, multi-entry rewrite (main + mainImage), range hints |
+| 3 — Histogram compute pass | 🔄 **IN PROGRESS** | |
 | 4 — Composite display shader | ⬜ pending | |
 | 5 — QML inspector panel | ⬜ pending | |
 | 6 — Per-pixel inspection | ⬜ pending | |

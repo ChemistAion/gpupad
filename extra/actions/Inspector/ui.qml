@@ -62,8 +62,13 @@ Item {
       return
     }
     const result = inspector.apply(expr)
-    statusLabel.text = result.ok
-      ? "✓  " + expr + "  →  " + result.type
-      : "✗  " + result.error
+    if (result.ok) {
+      let msg = "✓  " + expr + "  →  " + result.type
+      if (result.rangeHint)
+        msg += "  [" + result.rangeHint.min + ", " + result.rangeHint.max + "]"
+      statusLabel.text = msg
+    } else {
+      statusLabel.text = "✗  " + result.error
+    }
   }
 }
