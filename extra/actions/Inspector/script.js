@@ -52,6 +52,9 @@ class Inspector {
     this._compCall        = null
     // Per-pixel inspection
     this._mouseFragBind    = null
+    // Multi-shader support
+    this._forwardedBindings = []
+    this._targetCallId      = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''
@@ -245,6 +248,93 @@ class Inspector {
 
     return prefix + uniformDecl + rest.slice(0, lastBrace) + printfBlock + rest.slice(lastBrace)
   }
+
+  // ── Multi-shader helpers ───────────────────────────────────────────────────
+
+  // Return an array of { label, callId, programId } for every non-inspector
+  // Draw call in the session.  The QML ComboBox is populated from this.
+  listDrawCalls() {
+    const inspId = this._group ? this._group.id : null
+    const calls = app.session.findItems(
+      item => item.type === 'Call' && item.callType === 'Draw'
+    )
+    const result = []
+    for (const c of calls) {
+      const parent = app.session.getParentItem(c)
+      if (inspId && parent && parent.id === inspId) continue
+      if (!c.programId) continue
+      const prog = app.session.findItem(c.programId)
+      if (!prog) continue
+      const pName = parent ? parent.name : ''
+      const label = pName ? (pName + ' / ' + c.name) : c.name
+      result.push({ label: label, callId: c.id, programId: prog.id })
+    }
+    return result
+  }
+
+  // Walk parent chain from `item`, collecting every Binding at each scope level.
+  collectBindingsInScope(item) {
+    const bindings = []
+    const seen = new Set()
+    let current = app.session.getParentItem(item)
+    while (current) {
+      if (current.items) {
+        for (const child of current.items) {
+          if (child.type === 'Binding' && !seen.has(child.name)) {
+            seen.add(child.name)
+            bindings.push(child)
+          }
+        }
+      }
+      current = app.session.getParentItem(current)
+    }
+    return bindings
+  }
+
+  // Clone in-scope bindings into the inspector group so the rewritten shader
+  // can access the same textures, samplers and uniforms as the original.
+  forwardBindings(targetCall, group) {
+    // Remove previously forwarded bindings
+    for (const b of this._forwardedBindings) {
+      try { app.session.deleteItem(b) } catch (_) {}
+    }
+    this._forwardedBindings = []
+
+    const skip = new Set(["uInspectorTex","uInspectorSampler","HistogramBuffer","uMappingMode","uMappingRange","uChannelMask","uHighlightOOR","uHistogramHeight","uMouseFragCoord"])
+    const inScope = this.collectBindingsInScope(targetCall)
+
+    for (const b of inScope) {
+      if (skip.has(b.name)) continue
+      const desc = {
+        type: 'Binding', name: b.name,
+        bindingType: b.bindingType
+      }
+      // Carry over type-specific references
+      if (b.textureId)  desc.textureId  = b.textureId
+      if (b.bufferId)   desc.bufferId   = b.bufferId
+      if (b.blockId)    desc.blockId    = b.blockId
+      if (b.subroutine) desc.subroutine = b.subroutine
+      // Sampler properties
+      if (b.bindingType === 'Sampler') {
+        desc.minFilter = b.minFilter
+        desc.magFilter = b.magFilter
+      }
+      // Image properties
+      if (b.bindingType === 'Image') {
+        desc.level = b.level
+        desc.layer = b.layer
+        desc.imageFormat = b.imageFormat
+      }
+      // Uniform values + editor
+      if (b.bindingType === 'Uniform') {
+        desc.editor = b.editor
+        desc.values = Array.from(b.values || ['0'])
+      }
+      this._forwardedBindings.push(
+        app.session.insertItem(group, desc)
+      )
+    }
+  }
   // ── Shader targeting ────────────────────────────────────────────────────────
 
   // Determine which linked fragment shader to rewrite for a given expression.
@@ -305,8 +395,16 @@ class Inspector {
 
   // ── Session helpers ─────────────────────────────────────────────────────────
 
-  // Find the first active Draw call that is NOT inside our Inspector group.
-  findTargetProgram() {
+  // Find the program for a given Draw call (or the first active one).
+  // Returns { program, call } or null.
+  findTargetProgram(callId) {
+    if (callId) {
+      const call = app.session.findItem(callId)
+      if (call && call.programId) {
+        const prog = app.session.findItem(call.programId)
+        if (prog) return { program: prog, call: call }
+      }
+    }
     const inspId = this._group ? this._group.id : null
     const calls  = app.session.findItems(
       item => item.type === 'Call' && item.callType === 'Draw'
@@ -317,7 +415,7 @@ class Inspector {
       if (call.checked === false) continue
       if (call.programId) {
         const prog = app.session.findItem(call.programId)
-        if (prog) return prog
+        if (prog) return { program: prog, call: call }
       }
     }
     return null
@@ -357,13 +455,15 @@ class Inspector {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  apply(expression) {
+  apply(expression, callId) {
     const v = this.validate(expression)
     if (!v.ok) return v
 
-    const program = this.findTargetProgram()
-    if (!program)
+    const target = this.findTargetProgram(callId)
+    if (!target)
       return { ok: false, error: 'No active Draw call found in session' }
+    const program = target.program
+    this._targetCallId = target.call.id
 
     // Collect all shaders; read fragment sources
     const shaders = program.items.filter(s => s.type === 'Shader')
@@ -411,6 +511,9 @@ class Inspector {
     rewritten = this.injectPrintf(rewritten, expression, outVar)
 
     const group = this.ensureGroup()
+
+    // Forward bindings from the target call's scope into the inspector group
+    this.forwardBindings(target.call, group)
 
     // Texture (RGBA32F) – match existing target texture size if possible
     if (!this._texture) {
@@ -697,6 +800,8 @@ class Inspector {
     this._compModeBind = this._compRangeBind = this._compChanBind = null
     this._compOORBind = this._compHistHBind = this._compCall = null
     this._mouseFragBind = null
+    this._forwardedBindings = []
+    this._targetCallId = null
     this.enabled    = false
     this.expression = ''
     this.lastType   = ''

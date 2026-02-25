@@ -49,6 +49,34 @@ Pane {
       text: "Enter a GLSL expression and press Apply"
     }
 
+
+    // Target draw call
+    Label { text: "Target Call"; font.bold: true }
+
+    RowLayout {
+      Layout.fillWidth: true
+      spacing: 8
+
+      ComboBox {
+        id: callBox
+        Layout.fillWidth: true
+        model: []
+        property var callIds: []
+        property int selectedCallId: -1
+        onActivated: function(index) {
+          if (index >= 0 && index < callIds.length)
+            selectedCallId = callIds[index]
+        }
+      }
+
+      Button {
+        text: "\u21BB"
+        implicitWidth: 32
+        ToolTip.text: "Refresh draw call list"
+        ToolTip.visible: hovered
+        onClicked: root.refreshCallList()
+      }
+    }
     // ?? Mapping ???????????????????????????????????????????????????????????
     Label { text: "Mapping"; font.bold: true }
 
@@ -191,7 +219,8 @@ Pane {
       statusLabel.text = "? Enter an expression first"
       return
     }
-    const result = inspector.apply(expr)
+    const cid = callBox.selectedCallId > 0 ? callBox.selectedCallId : undefined
+    const result = inspector.apply(expr, cid)
     if (result.ok) {
       let msg = "?  " + expr + "  ?  " + result.type
       if (result.rangeHint) {
@@ -212,4 +241,22 @@ Pane {
   function pushChannels() {
     inspector.setChannelMask(root.chR, root.chG, root.chB, root.chA)
   }
+
+  function refreshCallList() {
+    const calls = inspector.listDrawCalls()
+    let labels = []
+    let ids = []
+    for (let i = 0; i < calls.length; i++) {
+      labels.push(calls[i].label)
+      ids.push(calls[i].callId)
+    }
+    callBox.model = labels
+    callBox.callIds = ids
+    if (ids.length > 0 && callBox.selectedCallId <= 0) {
+      callBox.currentIndex = 0
+      callBox.selectedCallId = ids[0]
+    }
+  }
+
+  Component.onCompleted: refreshCallList()
 }
