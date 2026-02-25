@@ -456,9 +456,11 @@ class Inspector {
         type: 'Program', name: 'HistogramProgram',
         items: [{
           type: 'Shader', shaderType: 'Compute',
-          fileName: 'histogram.comp', language: 'GLSL'
+          language: 'GLSL'
         }]
       })
+      app.session.setShaderSource(
+        this._histProgram.items[0], app.readTextFile('histogram.comp'))
     }
 
     if (!this._histImageBind) {
@@ -508,7 +510,7 @@ class Inspector {
 
     if (!this._compTexture) {
       this._compTexture = app.session.insertItem(group, {
-        type: 'Texture', name: 'InspectorDisplay', format: 'RGBA8',
+        type: 'Texture', name: 'InspectorDisplay', format: 'RGBA8_UNorm',
         width: this._texture.width, height: this._texture.height,
         target: 'Target2D', samples: 1, flipVertically: false
       })
@@ -530,11 +532,15 @@ class Inspector {
         type: 'Program', name: 'CompositeProgram',
         items: [
           { type: 'Shader', shaderType: 'Vertex',
-            fileName: 'attributeless.vs', language: 'GLSL' },
+            language: 'GLSL' },
           { type: 'Shader', shaderType: 'Fragment',
-            fileName: 'composite.fs', language: 'GLSL' }
+            language: 'GLSL' }
         ]
       })
+      app.session.setShaderSource(
+        this._compProgram.items[0], app.readTextFile('attributeless.vs'))
+      app.session.setShaderSource(
+        this._compProgram.items[1], app.readTextFile('composite.fs'))
     }
 
     if (!this._compSamplerBind) {
