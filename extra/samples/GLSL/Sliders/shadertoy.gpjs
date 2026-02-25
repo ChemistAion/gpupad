@@ -81,7 +81,6 @@
             "editor": "Expression3",
             "id": 934,
             "name": "iTest",
-            "sliders": true,
             "type": "Binding",
             "values": [
                 "0.283",
@@ -95,21 +94,18 @@
                 {
                     "fileName": "attributeless.vs",
                     "id": 77,
-                    "language": "GLSL",
                     "shaderType": "Vertex",
                     "type": "Shader"
                 },
                 {
                     "fileName": "shadertoy.fs",
                     "id": 78,
-                    "language": "GLSL",
                     "shaderType": "Fragment",
                     "type": "Shader"
                 },
                 {
                     "fileName": "image.fs",
                     "id": 79,
-                    "language": "GLSL",
                     "shaderType": "Fragment",
                     "type": "Shader"
                 }
@@ -136,8 +132,11 @@
     ],
     "name": "Session",
     "renderer": "OpenGL",
-    "shaderCompiler": "",
+    "shaderCompiler": "Driver",
+    "shaderCompilerSettings": {
+    },
     "shaderIncludePaths": "",
+    "shaderLanguage": "GLSL",
     "shaderPreamble": "",
     "type": "Session"
 }
