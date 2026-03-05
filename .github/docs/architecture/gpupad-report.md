@@ -53,7 +53,7 @@ The application is built on **Qt 6** (Widgets, OpenGL, Qml, Quick, Multimedia), 
 |---------|---------|
 | Standard | C++20, CMake 3.21+ |
 | Unity Build | Optional (`ENABLE_UNITY_BUILD`) |
-| Qt Modules | Core, Widgets, OpenGLWidgets, OpenGL, Qml; optional Quick, QuickWidgets, Multimedia |
+| Qt Modules | Core, Widgets, OpenGL, Qml; optional Quick, Multimedia (no OpenGLWidgets/QuickWidgets — uses `QWidget::createWindowContainer`) |
 | GPU Libraries | KDGpu (Vulkan abstraction, built from `libs/KDGpu`), Vulkan SDK, VulkanMemoryAllocator |
 | Shader Toolchain | glslang (GLSL→SPIRV), SPIRV-Cross (SPIRV→GLSL/HLSL cross-compilation), SPIRV-Tools (optimization), spirv-reflect (reflection) |
 | Optional | OpenImageIO (extended image formats), Slang (shader language), DXC (DirectX Shader Compiler, Win32) |
@@ -114,7 +114,7 @@ Central service locator holding all application-wide objects. Constructed on the
 | `sessionModel()` | `SessionModel` | The session tree data model (`QAbstractItemModel`) |
 | `synchronizeLogic()` | `SynchronizeLogic` | Orchestrates evaluation loop, bridges model↔render↔editors |
 | `videoManager()` | `VideoManager` | Video file playback (optional Qt Multimedia) |
-| `inputState()` | `InputState` | Mouse/keyboard state for shader input |
+| `inputState()` | `InputState` | Mouse/keyboard/time/frame state, owns frameIndex/frameRate/time with change signals |
 | `customActions()` | `CustomActions` | Discovers and runs user-defined JS action plugins |
 | `defaultScriptEngine()` | `ScriptEngine` | Default JS engine for expression evaluation |
 | `glRenderer()` | `GLRenderer` | OpenGL 4.5 renderer (lazy-init) |
@@ -463,7 +463,7 @@ Hex/data editor built on `QTableView`:
 
 Texture viewer built on `QAbstractScrollArea`:
 
-- **GLWidget**: OpenGL rendering of texture data with zoom/pan.
+- **GLWindow**: `QWindow`-based OpenGL surface, embedded via `QWidget::createWindowContainer()`. Provides `gl()` returning `QOpenGLFunctions_4_5_Core`. Renders texture data with zoom/pan.
 - **TextureItem**: Renders the actual texture quad.
 - **TextureBackground**: Checkerboard pattern for alpha visualization.
 - **Histogram**: GPU-computed histogram via `ComputeRange` (compute shader on GL backend).
@@ -474,7 +474,7 @@ Texture viewer built on `QAbstractScrollArea`:
 
 **File**: `editors/qml/QmlView.h`
 
-Embeds a `QQuickWidget` for rendering QML content:
+Embeds a `QQuickView` (via `QWidget::createWindowContainer()`) for rendering QML content:
 - Used for custom UI overlays and interactive visualizations.
 - Dependency tracking for automatic reload.
 - Optional custom `ScriptEngine` integration.
@@ -498,7 +498,7 @@ Wraps `QJSEngine` to provide:
 
 | Object | Exposed As | Purpose |
 |--------|-----------|---------|
-| `AppScriptObject` | `app` | Application info, frame index, time, viewport size |
+| `AppScriptObject` | `app` | Application info, evaluation mode, frame index, time, frame rate |
 | `ConsoleScriptObject` | `console` | `console.log()` → message window |
 | `EditorScriptObject` | `editor` | Open/close/modify source files |
 | `LibraryScriptObject` | `library` | Math utilities (gl-matrix, etc.) |
@@ -732,13 +732,14 @@ Custom `QProxyStyle` subclass for fine-tuning Qt widget appearance (tab bar metr
 
 **File**: `InputState.h`, `InputState.cpp`
 
-Captures mouse/keyboard state for shader-accessible input:
+Captures mouse/keyboard/timing state for shader-accessible input:
 
 - **Mouse**: Position, previous position, button states (Up/Down/Pressed/Released).
 - **Keyboard**: Key states with the same 4-state model.
+- **Timing**: `frameIndex`, `frameRate`, `time` — owned by InputState (moved from SynchronizeLogic), with change signals `frameIndexChanged()`, `frameRateChanged()`, `timeChanged()`.
 - **Editor size**: Viewport dimensions.
 - State is double-buffered (next → current) via `update()`.
-- Changes emit `mouseChanged()` / `keysChanged()` → trigger re-evaluation in Automatic mode.
+- Changes emit `mouseChanged()` / `keysChanged()` / `frameIndexChanged()` / `timeChanged()` → trigger re-evaluation in Automatic mode.
 
 ### VideoManager / VideoPlayer
 
@@ -881,7 +882,7 @@ Bindings are accumulated on a scope stack as the session tree is traversed. At c
 | `FileDialog.h/cpp` | File dialog utilities, untitled file management |
 | `MessageList.h/cpp` | Global thread-safe message collection |
 | `TextureData.h/cpp` | KTX-based texture storage and format conversion |
-| `InputState.h/cpp` | Mouse/keyboard input capture |
+| `InputState.h/cpp` | Mouse/keyboard/timing input state, change signals |
 | `VideoManager.h/cpp` | Video file playback management |
 | `VideoPlayer.h/cpp` | Qt Multimedia-based video frame decoder |
 | `SourceType.h/cpp` | Shader source type enumeration and detection |
@@ -938,7 +939,7 @@ Bindings are accumulated on a scope stack as the session tree is traversed. At c
 | (root) | `EditorManager`, `IEditor`, `DockWindow`, `DockTitle` |
 | `source/` | `SourceEditor`, `FindReplaceBar`, `MultiTextCursors`, `Completer`, `SyntaxHighlighter`, `SyntaxGLSL/HLSL/Slang/JavaScript/Generic`, `SourceEditorToolBar` |
 | `binary/` | `BinaryEditor`, `BinaryEditorToolBar` |
-| `texture/` | `TextureEditor`, `GLWidget`, `TextureItem`, `TextureBackground`, `Histogram`, `TextureInfoBar`, `TextureEditorToolBar` |
+| `texture/` | `TextureEditor`, `GLWindow`, `TextureItem`, `TextureBackground`, `Histogram`, `TextureInfoBar`, `TextureEditorToolBar` |
 | `qml/` | `QmlView` |
 
 ### `session/` — Session Model

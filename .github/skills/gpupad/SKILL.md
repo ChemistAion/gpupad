@@ -62,7 +62,7 @@ src/
 ├── FileDialog.h/cpp            # File dialog helpers, untitled file naming
 ├── MessageList.h/cpp           # Thread-safe message collection
 ├── TextureData.h/cpp           # KTX-based texture storage and format conversion
-├── InputState.h/cpp            # Mouse/keyboard input capture for shaders
+├── InputState.h/cpp            # Mouse/keyboard/time/frame input state, signals for changes
 ├── VideoManager.h / VideoPlayer.h  # Video file playback (optional Qt Multimedia)
 ├── Evaluation.h                # EvaluationMode/EvaluationType enums
 ├── Theme.h/cpp                 # JSON-based theme loading, QPalette management
@@ -103,8 +103,8 @@ src/
 │   ├── source/                 # SourceEditor, FindReplaceBar, MultiTextCursors,
 │   │                           # Completer, SyntaxHighlighter, SyntaxGLSL/HLSL/Slang/JS
 │   ├── binary/                 # BinaryEditor (hex + structured data views)
-│   ├── texture/                # TextureEditor, GLWidget, TextureItem, Histogram
-│   └── qml/                    # QmlView (QQuickWidget for custom UIs)
+│   ├── texture/                # TextureEditor, GLWindow (QWindow), TextureItem, Histogram
+│   └── qml/                    # QmlView (QQuickView via createWindowContainer)
 │
 ├── scripting/                  # JAVASCRIPT SCRIPTING
 │   ├── ScriptEngine.h/cpp      # QJSEngine wrapper, expression evaluation
@@ -135,7 +135,7 @@ src/
 |---------|---------|
 | **Standard** | C++20, CMake 3.21+ |
 | **Unity Build** | Optional (`ENABLE_UNITY_BUILD`) |
-| **Qt Modules** | Core, Widgets, OpenGLWidgets, OpenGL, Qml; optional Quick, QuickWidgets, Multimedia |
+| **Qt Modules** | Core, Widgets, OpenGL, Qml; optional Quick, Multimedia (no OpenGLWidgets/QuickWidgets — uses `QWidget::createWindowContainer`) |
 | **GPU Libraries** | KDGpu (Vulkan abstraction, `libs/KDGpu`), Vulkan SDK, VulkanMemoryAllocator |
 | **Shader Toolchain** | glslang (GLSL→SPIRV), SPIRV-Cross (cross-compilation), SPIRV-Tools (optimization), spirv-reflect |
 | **Optional** | OpenImageIO (extended image formats), Slang (shader language), DXC (DirectX Shader Compiler) |
@@ -186,7 +186,7 @@ QT_DISABLE_DEPRECATED_BEFORE=0x060500, QT_NO_FOREACH
 | `sessionModel()` | `SessionModel` | Session tree data model (QAbstractItemModel) |
 | `synchronizeLogic()` | `SynchronizeLogic` | Evaluation loop orchestrator |
 | `videoManager()` | `VideoManager` | Video file playback (optional) |
-| `inputState()` | `InputState` | Mouse/keyboard state for shaders |
+| `inputState()` | `InputState` | Mouse/keyboard/time/frame state, owns frameIndex/frameRate/time with change signals |
 | `customActions()` | `CustomActions` | JS action plugin discovery/execution |
 | `defaultScriptEngine()` | `ScriptEngine` | Default JS engine for expression evaluation |
 | `glRenderer()` | `GLRenderer` | OpenGL 4.5 renderer (lazy-init) |
@@ -396,8 +396,8 @@ class IEditor {
 |------|------|----------|
 | `SourceEditor` | `QPlainTextEdit` | Line numbers, syntax highlighting (GLSL/HLSL/Slang/JS), auto-completion, find/replace with regex, multi-cursor editing |
 | `BinaryEditor` | `QTableView` | Hex view + structured data view (from Block/Field layout), typed editing via `SpinBoxDelegate` |
-| `TextureEditor` | `QAbstractScrollArea` | GL-rendered texture preview with zoom/pan, checkerboard alpha, GPU histogram, mipmap selection |
-| `QmlView` | `QQuickWidget` | QML content rendering, dependency tracking, ScriptEngine integration |
+| `TextureEditor` | `QAbstractScrollArea` | GL-rendered texture preview via `GLWindow` (QWindow) embedded with `createWindowContainer()`, zoom/pan, checkerboard alpha, GPU histogram, mipmap selection |
+| `QmlView` | `QFrame` | QML content via `QQuickView` embedded with `createWindowContainer()`, dependency tracking, ScriptEngine integration |
 
 ### 2.10 Scripting Engine Internals
 
@@ -1017,14 +1017,21 @@ GPUpad uses **Qt's QJSEngine** for JavaScript evaluation. Scripts run in a dedic
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `frameIndex` | Number | Current animation frame |
-| `frameRate` | Number | Playback rate |
-| `time` | Number | Elapsed time (seconds) |
+| `evaluation` | String | Evaluation mode: `"Paused"`, `"Automatic"`, `"Steady"`. Write also accepts `"Manual"` (single step) and `"Reset"` (reset + re-evaluate) |
+| `frameIndex` | Number | Current animation frame (writable — setting triggers re-evaluation) |
+| `frameRate` | Number | Playback rate (writable) |
+| `time` | Number | Elapsed time in seconds (writable — setting triggers re-evaluation) |
 | `timeDelta` | Number (r/o) | Delta since last frame |
 | `date` | [Number] (r/o) | `[year, month, day, secondsOfDay]` |
 | `session` | Session (r/o) | Session manipulation API |
 | `mouse` | Mouse (r/o) | Mouse input state |
 | `keyboard` | Keyboard (r/o) | Keyboard input state |
+
+**Signals** (observable from QML via `onXxxChanged`):
+- `evaluationChanged` — evaluation mode changed
+- `frameIndexChanged` — frame index changed (from script or UI)
+- `frameRateChanged` — frame rate changed
+- `timeChanged` — time changed
 
 **Methods**:
 
@@ -1383,7 +1390,7 @@ ScrollView {
 }
 ```
 
-**Available QML modules**: `QtQuick 2.12`, `QtQuick.Controls 2.12`, `QtQuick.Layouts 1.12`, `QtQuick.Shapes 1.15`. The QML context shares the script engine, so all `script.*` methods and `app.*` globals are directly callable.
+**Available QML modules**: `QtQuick` / `QtQuick.Controls` / `QtQuick.Layouts` / `QtQuick.Shapes` (Qt6 bare imports or versioned: `QtQuick 2.12`, etc.). The QML context shares the script engine, so all `script.*` methods and `app.*` globals are directly callable.
 
 **JS↔QML data flow**:
 1. QML `property alias` → readable/writable from JS as `this.ui.propertyName`
@@ -2141,6 +2148,16 @@ Displays `app.time`, `app.timeDelta`, `app.frameRate`, and `app.date` in a docka
 
 **API used**: `app.frameRate`, `app.time`, `app.timeDelta`, `app.date`, `openEditor()`
 
+### 11.10 Evaluation
+
+**Type**: JS + QML | **Directory**: `Evaluation/`
+
+Interactive control panel for GPUpad's evaluation modes and playback state. Provides sliders for `app.frameIndex` (0–1000) and `app.time` (0–16.67ms), plus buttons to switch between evaluation modes (Paused, Automatic, Steady, Manual, Reset).
+
+**API used**: `app.evaluation` (R/W), `app.frameIndex` (R/W), `app.time` (R/W), `openEditor()`
+
+**Note**: Uses Qt6-style bare QML imports (`import QtQuick`, not `import QtQuick 2.12`).
+
 ---
 
 ## 12. Extra Directory — Themes, Libraries & Packaging
@@ -2188,14 +2205,14 @@ const { mat4, vec3 } = glMatrix;
 
 ### 12.3 QML Imports (`extra/qml/`)
 
-`imports.qml` documents the available Qt Quick modules in the scripting environment:
+`imports.qml` documents the available Qt Quick modules in the scripting environment. Both Qt6 bare imports and versioned imports are supported:
 
-| Module | Version | Use Case |
-|--------|---------|----------|
-| `QtQuick` | 2.12 | Core items, animations, layouts |
-| `QtQuick.Controls` | 2.12 | Buttons, sliders, combo boxes, text fields |
-| `QtQuick.Layouts` | 1.12 | GridLayout, RowLayout, ColumnLayout |
-| `QtQuick.Shapes` | 1.15 | Vector graphics, paths, gradients |
+| Module | Versioned (legacy) | Use Case |
+|--------|-------------------|----------|
+| `QtQuick` | `QtQuick 2.12` | Core items, animations, layouts |
+| `QtQuick.Controls` | `QtQuick.Controls 2.12` | Buttons, sliders, combo boxes, text fields |
+| `QtQuick.Layouts` | `QtQuick.Layouts 1.12` | GridLayout, RowLayout, ColumnLayout |
+| `QtQuick.Shapes` | `QtQuick.Shapes 1.15` | Vector graphics, paths, gradients |
 
 Custom QML modules (like `NodeGraph 1.0`) use `qmldir` manifests in their directories.
 
@@ -2218,6 +2235,7 @@ WiX-based MSI installer template with:
 extra/
 ├── actions/               # Custom actions (Section 8 + 11)
 │   ├── Compile all shader files to Spir-V.js
+│   ├── Evaluation/        # JS + QML (evaluation mode control)
 │   ├── GenerateMesh/      # C++ + JS + QML
 │   ├── ImportOBJ/         # C++ + JS + QML
 │   ├── Import_glTF.js
