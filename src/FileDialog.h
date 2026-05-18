@@ -3,6 +3,7 @@
 #include "SourceType.h"
 #include <QDir>
 #include <QMessageBox>
+#include <optional>
 
 class QMainWindow;
 
@@ -21,6 +22,7 @@ public:
     static bool isShaderFileName(const QString &fileName);
     static bool isScriptFileName(const QString &fileName);
     static bool isTextureFileName(const QString &fileName);
+    static bool isSequenceFileName(const QString &fileName);
     static bool isVideoFileName(const QString &fileName);
 
     enum OptionBit {
@@ -62,15 +64,19 @@ private:
 
 extern const QString SamplesDir;
 extern const QString ActionsDir;
+extern const QString LibrariesDir;
 
 bool isNativeCanonicalFilePath(const QString &fileName);
+QString toNativeCanonicalAbsoluteFilePath(const QString &fileName);
 QString toNativeCanonicalFilePath(const QString &fileName);
+QString toForwardSlashRelativeFilePath(const QString &fileName);
 void showInFileManager(const QString &path);
 int showNotSavedDialog(QWidget *parent, const QString &fileName);
 bool showSavingFailedMessage(QWidget *parent, const QString &fileName);
 void showCopyingSessionFailedMessage(QWidget *parent);
-QDir getInstallDirectory(const QString &dirName);
-QDir getUserDirectory(const QString &dirName);
+std::optional<QDir> getInstallDirectory(const QString &dirName);
+std::optional<QDir> getWorkingDirectory(const QString &dirName);
+std::optional<QDir> getUserDirectory(const QString &dirName);
 QList<QDir> getApplicationDirectories(const QString &dirName);
 QFileInfoList enumerateApplicationPaths(const QString &dirName,
     QDir::Filters filters);

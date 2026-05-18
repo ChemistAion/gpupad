@@ -6,13 +6,15 @@
 #include <QMap>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QRegularExpression>
 
 namespace {
     const auto UntitledTag = QStringLiteral("/UT/");
     const auto SessionFileExtension = QStringLiteral("gpjs");
-    const auto ShaderFileExtensions = { "glsl", "vs", "fs", "gs", "vert",
-        "tesc", "tese", "geom", "frag", "comp", "task", "mesh", "rgen", "rint",
-        "rahit", "rchit", "rmiss", "rcall", "ps", "hlsl", "hlsli", "fx", "h" };
+    const auto ShaderFileExtensions = { "glsl", "hlsl", "slang", "vs", "fs",
+        "gs", "vert", "tesc", "tese", "geom", "frag", "comp", "task", "mesh",
+        "rgen", "rint", "rahit", "rchit", "rmiss", "rcall", "ps", "hlsli", "fx",
+        "h" };
     const auto ScriptFileExtensions = { "js", "json", "qml" };
     const auto TextureFileExtensions = { "ktx", "dds", "png",
 #if defined(OpenImageIO_FOUND)
@@ -32,6 +34,7 @@ namespace {
         switch (sourceType) {
         case SourceType::PlainText:
         case SourceType::Generic:                    break;
+        case SourceType::Slang:                      return "slang";
         case SourceType::GLSL_VertexShader:          return "vert";
         case SourceType::GLSL_FragmentShader:        return "frag";
         case SourceType::GLSL_GeometryShader:        return "geom";
@@ -68,6 +71,7 @@ namespace {
 
 const QString SamplesDir = QStringLiteral("samples");
 const QString ActionsDir = QStringLiteral("actions");
+const QString LibrariesDir = QStringLiteral("libs");
 
 QString FileDialog::generateNextUntitledFileName(QString base)
 {
@@ -155,8 +159,17 @@ bool FileDialog::isVideoFileName(const QString &fileName)
     for (const auto &ext : VideoFileExtensions)
         if (ext == extension)
             return true;
+
     return false;
 }
+
+bool FileDialog::isSequenceFileName(const QString &fileName)
+{
+    static const auto imageSequencePattern = QRegularExpression("%\\d+d");
+    return (QFileInfo(fileName).fileName().contains(imageSequencePattern));
+}
+
+//-------------------------------------------------------------------------
 
 FileDialog::FileDialog(QMainWindow *window) : mWindow(window) { }
 
@@ -272,10 +285,9 @@ bool FileDialog::exec(Options options, QString currentFileName,
         dialog.setDirectory(mDirectory);
     dialog.selectFile(currentFileName);
 
-    if (const auto extension = getFileExtension(currentFileName);
-        !extension.isEmpty())
-        for (const auto &filter : filters)
-            if (filter.contains("*." + extension)) {
+    if (auto ext = getFileExtension(currentFileName); !ext.isEmpty())
+        for (const auto &filter : std::as_const(filters))
+            if (filter.contains("*." + ext)) {
                 dialog.selectNameFilter(filter);
                 break;
             }
@@ -291,6 +303,8 @@ bool FileDialog::exec(Options options, QString currentFileName,
     return true;
 }
 
+//-------------------------------------------------------------------------
+
 bool isNativeCanonicalFilePath(const QString &fileName)
 {
     return (toNativeCanonicalFilePath(fileName) == fileName);
@@ -304,6 +318,20 @@ QString toNativeCanonicalFilePath(const QString &fileName)
     Q_ASSERT(fileInfo.isAbsolute());
     return QDir::toNativeSeparators(
         fileInfo.exists() ? fileInfo.canonicalFilePath() : fileName);
+}
+
+QString toNativeCanonicalAbsoluteFilePath(const QString &fileName)
+{
+    if (FileDialog::isEmptyOrUntitled(fileName))
+        return fileName;
+    return toNativeCanonicalFilePath(
+        QDir::current().absoluteFilePath(fileName));
+}
+
+QString toForwardSlashRelativeFilePath(const QString &fileName)
+{
+    return QDir::fromNativeSeparators(
+        QDir::current().relativeFilePath(fileName));
 }
 
 QString getFirstDirEntry(const QString &path)
@@ -379,20 +407,17 @@ void showCopyingSessionFailedMessage(QWidget *parent)
     dialog.exec();
 }
 
-QDir getInstallDirectory(const QString &dirName)
+std::optional<QDir> getInstallDirectory(const QString &dirName)
 {
     const auto binDir = QDir(QCoreApplication::applicationDirPath());
     const auto installDir = (binDir.dirName() == "bin"
             ? QDir::cleanPath(binDir.filePath(".."))
             : binDir);
     const auto searchPaths = std::initializer_list<QDir>{
-#if !defined(NDEBUG)
+        // also search for extra folder (to simplify development)
         installDir.filePath("../../extra"),
         installDir.filePath("../extra"),
         installDir.filePath("extra"),
-        installDir.filePath(".."),
-        installDir.filePath("../.."),
-#endif
 #if defined(_WIN32)
         installDir.path(),
 #else
@@ -406,10 +431,25 @@ QDir getInstallDirectory(const QString &dirName)
         if (path.exists(dirName))
             return QDir::cleanPath(path.filePath(dirName));
 
-    return QDir();
+    return std::nullopt;
 }
 
-QDir getUserDirectory(const QString &dirName)
+std::optional<QDir> getWorkingDirectory(const QString &dirName)
+{
+    const auto currentDir = QDir::current();
+    const auto searchPaths = std::initializer_list<QDir>{
+        // also search for extra folder (to simplify development)
+        currentDir.filePath("extra"),
+        currentDir.path(),
+    };
+    for (const auto &path : searchPaths)
+        if (path.exists(dirName))
+            return QDir::cleanPath(path.filePath(dirName));
+
+    return std::nullopt;
+}
+
+std::optional<QDir> getUserDirectory(const QString &dirName)
 {
     auto config =
         QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -420,14 +460,15 @@ QDir getUserDirectory(const QString &dirName)
 
 QList<QDir> getApplicationDirectories(const QString &dirName)
 {
-    auto result = QList<QDir>();
-    const auto dirs = {
-        getInstallDirectory(dirName),
-        getUserDirectory(dirName),
-    };
-    for (const auto &dir : dirs)
-        if (dir != QDir())
-            result.append(dir);
+    auto result = QList<QDir>{};
+    for (const auto &path : {
+            getWorkingDirectory(dirName),
+            getUserDirectory(dirName),
+            getInstallDirectory(dirName),
+        })
+        if (path.has_value())
+            result.append(path.value());
+
     return result;
 }
 

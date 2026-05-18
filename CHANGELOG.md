@@ -3,6 +3,134 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Version 3.4.1] - 2026-05-01
+
+### Added
+
+- Added `app.palette`.
+- Added `app.processShader(fileName, type)` overload.
+- Looking for QML modules in qml directory.
+- Added "Make Fragment Shader Session" action [WIP].
+
+### Fixed
+
+- Limiting refresh rate when there is no VSync.
+- Enumerating only existing application directories.
+- Handling empty filename in `app.openEditor`.
+- Fixed `app.readTextFile` of untitled file.
+- Throwing script errors in `app` method callbacks.
+- Preserving untitled filename when serializing script item.
+- Fixed deadlock when unloading running script.
+
+## [Version 3.4.0] - 2026-04-25
+
+### Changed
+
+- Moved `app.session` methods to `app` script object.
+- Updated scripts, replaced `app.session.` with `app.`.
+- CMake is using ccache when available.
+
+### Added
+
+- Keeping session item properties in sync with QML views.
+- Added `app.trackItems` - sample action Sliders adds/removes bindings.
+- Added item property `custom`, a map settable from scripts.
+- Added `app.isUntitled(fileName)` and `app.getFileTitle(fileName)`.
+- Opening Custom Action script in editor when holding Control key.
+- Allow to drag session root as JSON to source editor.
+
+## [Version 3.3.0] - 2026-04-11
+
+### Added
+
+- Added shortcut F4 to Custom Actions button.
+- Added `Evaluate Script` action.
+- Substituting includes in shader preamble.
+- Added "Launch using NVIDIA GPU" action to .desktop file.
+- Added `app.session.clear()`.
+- Added `app.saveEditor(fileName)`.
+- Added `app.saveFileDialog(pattern)`.
+- Added `app.evaluateScript(fileName)`.
+- Added `app.currentEditor` and `editor.type` properties.
+- Added `app.enumerateDirs(pattern)`.
+
+### Fixed
+
+- Made `app.session.openEditor` open depending on item type.
+- Keeping messages of session reset evaluation.
+- Replacing error messages of item property expressions.
+
+## [Version 3.2.0] - 2026-04-04
+
+### Added
+
+- Added `bin/gpupad-headless` command (#39).
+- Added basic support for image sequences (#26).
+- Added export button to message window (#39).
+- Added export button to output window.
+
+### Changed
+
+- Synchronized video playback with `app.time`.
+- Session `set*Data/set*Source` do no longer open an editor (#42).
+- Allow file items' names to diverge from filenames (#41).
+- Added timeout to script engines running on main thread.
+- Interrupting script engines when unloading session or resetting.
+
+### Fixed
+
+- Improved automatic evaluation on mouse movement.
+- Improved error handling when renderer is not available.
+
+## [Version 3.1.0] - 2026-03-23
+
+### Added
+
+- Added Sync Interval menu to View menu.
+- Added close button to editor dock title bars.
+- Enumerating actions also in session directory (#40).
+- Saving/restoring active actions in session state (#40).
+
+### Changed
+
+- Renamed `app` property `frameIndex` to `frame`, removed `frameRate`.
+- No longer advancing time in Automatic evaluation.
+- Searching for installation files in ../extra also in Release builds.
+
+### Fixed
+
+- Greatly improved UI rendering performance on Linux.
+- Fixed binding targets with D3D.
+- Fixed loading libraries from session base directory.
+- Fixed crash when opening Qml views from session scripts.
+
+## [Version 3.0.0] - 2026-03-14
+
+### Added
+
+- Added Direct3D 12 renderer [WIP].
+- Allow to select shader language and compiler in session properties.
+- Generating output window content with currently selected renderer.
+- Added `app` properties `time`, `timeDelta`, `frameRate` and `date` (#38).
+- Made `frameIndex` settable.
+- Allow to navigate back/fore with designated mouse buttons.
+- Trimming braces when pasting in binary editor.
+- Added NBodyGravity sample.
+- Added some demo custom actions [WIP].
+
+### Changed
+
+- Requiring OpenGL 4.5 support (might reconsider when this limits portability).
+- Split samples in GLSL and HLSL folders/submenus.
+- Improved multiline messages in message window.
+- Changed background color of property editor...
+
+### Fixed
+
+- Greatly improved UI rendering performance on Windows.
+- Only growing editor docks when resizing window.
+- Many minor fixes.
+
 ## [Version 2.7.0] - 2025-06-16
 
 ### Added
@@ -952,6 +1080,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Improved uniform not set warnings.
 - Source validation prepends headers.
 
+[version 3.4.1]: https://github.com/houmain/gpupad/compare/3.4.0...3.4.1
+[version 3.4.0]: https://github.com/houmain/gpupad/compare/3.3.0...3.4.0
+[version 3.3.0]: https://github.com/houmain/gpupad/compare/3.2.0...3.3.0
+[version 3.2.0]: https://github.com/houmain/gpupad/compare/3.1.0...3.2.0
+[version 3.1.0]: https://github.com/houmain/gpupad/compare/3.0.0...3.1.0
+[version 3.0.0]: https://github.com/houmain/gpupad/compare/2.7.0...3.0.0
 [version 2.7.0]: https://github.com/houmain/gpupad/compare/2.6.1...2.7.0
 [version 2.6.1]: https://github.com/houmain/gpupad/compare/2.6.0...2.6.1
 [version 2.6.0]: https://github.com/houmain/gpupad/compare/2.5.0...2.6.0

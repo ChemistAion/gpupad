@@ -13,6 +13,7 @@ class CustomAction final : public QAction
 public:
     explicit CustomAction(const QString &filePath);
 
+    void openInEditor();
     MessagePtrSet apply(const QModelIndexList &selection);
 
     bool updateManifest(ScriptEngine &scriptEngine);
@@ -32,10 +33,12 @@ public:
 
     // main thread
     void setSelection(const QModelIndexList &selection);
+    bool applyAction(const QString &id);
     QList<CustomActionPtr> getApplicableActions();
 
     // any thread
-    static bool applyActionInEngine(const QString &id, ScriptEngine &scriptEngine);
+    static bool applyActionInEngine(const QString &id,
+        ScriptEngine &scriptEngine);
 
 private:
     void actionTriggered();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GLItem.h"
+#include "GLContext.h"
 #include "render/TextureBase.h"
 #include <QOpenGLTexture>
 
@@ -9,9 +9,9 @@ class GLBuffer;
 class GLTexture : public TextureBase
 {
 public:
-    static bool upload(QOpenGLFunctions_3_3_Core &gl, const TextureData &data,
+    static bool upload(QOpenGLFunctions_4_5_Core &gl, const TextureData &data,
         QOpenGLTexture::Target target, int samples, GLuint *textureId);
-    static bool download(QOpenGLFunctions_3_3_Core &gl, TextureData &data,
+    static bool download(QOpenGLFunctions_4_5_Core &gl, TextureData &data,
         QOpenGLTexture::Target target, GLuint textureId);
 
     GLTexture(const Texture &texture, GLRenderSession &renderSession);
@@ -19,15 +19,25 @@ public:
         Texture::Format format, GLRenderSession &renderSession);
     bool operator==(const GLTexture &rhs) const;
 
-    GLuint textureId() const { return mTextureObject; }
+    void boundAsSampler() { }
+    void boundAsImage() { }
+
+    GLuint getSharedMemoryHandle() const { return mTextureObject; }
     GLuint64 obtainBindlessHandle();
     bool clear(std::array<double, 4> color, double depth, int stencil);
     bool copy(GLTexture &source);
     bool swap(GLTexture &other);
-    bool updateMipmaps();
+    bool updateMipmaps(GLContext &context);
     GLuint getReadOnlyTextureId();
     GLuint getReadWriteTextureId();
-    bool download();
+    void beginDownload(GLContext &context);
+    bool finishDownload();
+
+    bool download(GLContext &context)
+    {
+        beginDownload(context);
+        return finishDownload();
+    }
 
 private:
     void reload(bool forWriting);
@@ -37,4 +47,5 @@ private:
     GLBuffer *mTextureBuffer{};
     GLObject mTextureObject;
     GLuint64 mBindlessHandle{};
+    bool mDownloaded{};
 };

@@ -8,23 +8,23 @@ class Script {
   constructor() {
     this.library = app.loadLibrary("GenerateMesh")
   }
-  
+
   initializeUi(ui) {
     this.ui = ui
-    
+
     const typeCount = this.library.getTypeCount()
     const typeNames = []
     for (let i = 0; i < typeCount; ++i)
       typeNames[i] = this.library.getTypeName(i)
     this.ui.typeNames = typeNames
-    
+
     this.refresh()
   }
-  
+
   refresh() {
     const lib = this.library
     const ui = this.ui
-    
+
     this.settings = {
       type: ui.type,
       width: ui.width_,
@@ -44,37 +44,37 @@ class Script {
       indexed: ui.indexed,
       vertexPadding: ui.vertexPadding,
     }
-    
+
     const typeIndex = this.ui.typeIndex
     ui.hasStacks = lib.hasSlicesStacks(typeIndex)
     ui.hasSlices = lib.hasSlicesStacks(typeIndex)
     ui.hasRadius = lib.hasRadius(typeIndex)
     ui.hasSubdivisions = lib.hasSubdivisions(typeIndex)
     ui.hasSeed = lib.hasSeed(typeIndex)
-    
-    if (app.session.findItem(this.buffer))
+
+    if (app.findItem(this.buffer))
       this.generate()
   }
-  
+
   insert() {
-    this.group = app.session.findItem(this.settings.group)
-    
+    this.group = app.findItem(this.settings.group)
+
     if (!this.group)
       this.group =
-        app.session.insertItem(this.settings.parent || app.session, {
+        app.insertItem(this.settings.parent || app.session, {
           name: 'Mesh',
           type: 'Group',
           inlineScope: true,
         })
-        
+
     if (this.settings.name)
       this.group.name = this.settings.name
     if (this.settings.dynamic)
       this.group.dynamic = true
 
     this.buffer =
-      app.session.findItem(item => item.type == 'Buffer', this.group) ||
-      app.session.insertItem(this.group, {
+      app.findItem(item => item.type == 'Buffer', this.group) ||
+      app.insertItem(this.group, {
         name: 'Buffer',
         type: 'Buffer',
         items: [
@@ -95,18 +95,18 @@ class Script {
                 name: 'texcoord',
                 dataType: 'Float',
                 count: 2
-              }          
+              }
             ]
           }
         ]
       })
-      
+
     this.vertices = this.buffer.items[0]
     this.indices = this.buffer.items[1]
-    
+
     this.stream =
-      app.session.findItem(item => item.type == 'Stream', this.group) ||
-      app.session.insertItem(this.group, {
+      app.findItem(item => item.type == 'Stream', this.group) ||
+      app.insertItem(this.group, {
         name: 'Stream',
         type: 'Stream',
         items: [
@@ -124,14 +124,14 @@ class Script {
           }
         ]
       })
-    
-    this.drawCall = app.session.findItem(item => item.type == 'Call', this.group)
-    
-    app.session.replaceItems(this.group, [this.buffer, this.stream, this.drawCall])
-    
+
+    this.drawCall = app.findItem(item => item.type == 'Call', this.group)
+
+    app.replaceItems(this.group, [this.buffer, this.stream, this.drawCall])
+
     this.generate()
   }
-  
+
   updateBuffer() {
     const lib = this.library
     const geometry = lib.generate(JSON.stringify(this.settings))
@@ -141,13 +141,13 @@ class Script {
       const vertices = lib.getVertices(geometry)
       if (!vertices.length)
         throw "Generating geometry failed"
-        
+
       this.vertices.items[2].padding = padding * 4
       this.vertices.rowCount = vertices.length / components
-      app.session.setBlockData(this.vertices, vertices)
-      
+      app.setBlockData(this.vertices, vertices)
+
       if (!this.indices)
-        this.indices = app.session.insertItem(this.buffer, {
+        this.indices = app.insertItem(this.buffer, {
           name: 'Indices',
           type: 'Block',
           items: [
@@ -158,51 +158,51 @@ class Script {
             }
           ]
         })
-      
+
       const indices = lib.getIndices(geometry)
       this.indices.offset = this.vertices.rowCount * (components + padding) * 4
       this.indices.rowCount = indices.length / 3
-      app.session.setBlockData(this.indices, indices)
+      app.setBlockData(this.indices, indices)
     }
     else {
       const vertices = lib.getVerticesUnweld(geometry)
       if (!vertices.length)
         throw "Generating geometry failed"
-        
+
       this.vertices.items[2].padding = this.settings.vertexPadding * 4
       this.vertices.rowCount = vertices.length / components
-      app.session.setBlockData(this.vertices, vertices)
-      
+      app.setBlockData(this.vertices, vertices)
+
       if (this.indices) {
-        app.session.deleteItem(this.indices)
+        app.deleteItem(this.indices)
         this.indices = undefined
       }
     }
   }
-  
+
   updateDrawCall() {
     if (this.settings.drawCall === false) {
       if (this.drawCall)
-        app.session.deleteItem(this.drawCall)
+        app.deleteItem(this.drawCall)
       this.drawCall = undefined
       return
     }
-    
-    if (!this.drawCall) {
-      const target = app.session.findItem(item => item.type == 'Target')
 
-      const program = app.session.findItem(
+    if (!this.drawCall) {
+      const target = app.findItem(item => item.type == 'Target')
+
+      const program = app.findItem(
         item => (item.type == 'Program' &&
           item.items[0]?.shaderType == "Vertex"))
 
-      this.drawCall = app.session.insertItem(this.group, {
+      this.drawCall = app.insertItem(this.group, {
         name: 'Draw',
         type: 'Call',
         targetId: target?.id,
         programId: program?.id,
       })
     }
-    
+
     this.drawCall.count =
       (this.settings.indexed ?
         this.indices.rowCount * 3 : this.vertices.rowCount)
@@ -211,7 +211,7 @@ class Script {
     this.drawCall.vertexStreamId = this.stream?.id
     this.drawCall.indexBufferBlockId = this.indices?.id
   }
-  
+
   generate() {
     this.updateBuffer()
     this.updateDrawCall()
@@ -228,5 +228,5 @@ if (this.arguments) {
   this.result = this.script.group
 }
 else {
-  app.openEditor("ui.qml", manifest.name)
+  app.openEditor("ui.qml").title = manifest.name
 }

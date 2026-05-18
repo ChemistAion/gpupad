@@ -2,34 +2,32 @@
 
 #include "render/RenderSessionBase.h"
 #include <QOpenGLVertexArrayObject>
+#include <QOpenGLTimerQuery>
+#include <deque>
 
 class GLShareSync;
-class QOpenGLTimerQuery;
 
 class GLRenderSession final : public RenderSessionBase
 {
 public:
-    GLRenderSession(RendererPtr renderer, const QString &basePath);
+    struct CommandQueue;
+
+    explicit GLRenderSession(RendererPtr renderer);
     ~GLRenderSession();
 
     void render() override;
     void finish() override;
     void release() override;
     quint64 getTextureHandle(ItemId itemId) override;
+    std::vector<Duration> resetTimeQueries(size_t count) override;
+    std::shared_ptr<void> beginTimeQuery(size_t index) override;
 
 private:
-    struct CommandQueue;
-
     void createCommandQueue();
-    void buildCommandQueue();
-    void reuseUnmodifiedItems();
-    void executeCommandQueue();
-    void downloadModifiedResources();
-    void outputTimerQueries();
 
     QOpenGLVertexArrayObject mVao;
     std::shared_ptr<GLShareSync> mShareSync;
     std::unique_ptr<CommandQueue> mCommandQueue;
     std::unique_ptr<CommandQueue> mPrevCommandQueue;
-    MessagePtrSet mTimerMessages;
+    std::deque<QOpenGLTimerQuery> mTimeQueries;
 };

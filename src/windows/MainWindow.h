@@ -20,6 +20,7 @@ class FileBrowserWindow;
 class EditorManager;
 class SessionEditor;
 class PropertiesEditor;
+class GLWindow;
 class Theme;
 
 class MainWindow final : public QMainWindow
@@ -69,6 +70,7 @@ private:
     void updateFileActions();
     void focusNextEditor();
     void focusPreviousEditor();
+    void setDefaultContentsMargins();
     void setFullScreen(bool fullScreen);
     void stopSteadyEvaluation();
     void setEvaluationMode(EvaluationMode evaluationMode);
@@ -90,8 +92,10 @@ private:
     void handleThemeChanging(const Theme &theme);
     void handleHideMenuBarChanged(bool hide);
     void setToolbarIconVisible(QAction *action, bool visible);
+    void waitForSync();
 
     Ui::MainWindow *mUi{};
+    GLWindow *mSyncWindow{};
     QToolButton *mMenuButton{};
     QSplitter *mSessionSplitter{};
     QToolBar *mFullScreenBar{};

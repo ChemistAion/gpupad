@@ -1,12 +1,10 @@
 #include "GLBuffer.h"
 #include "Singletons.h"
 
-GLBuffer::GLBuffer(int size) : mSize(size) { }
+GLBuffer::GLBuffer(int size) : BufferBase(size) { }
 
 GLBuffer::GLBuffer(const Buffer &buffer, GLRenderSession &renderSession)
-    : mItemId(buffer.id)
-    , mFileName(buffer.fileName)
-    , mSize(renderSession.getBufferSize(buffer))
+    : BufferBase(buffer, renderSession.getBufferSize(buffer))
 {
     mUsedItems += buffer.id;
     for (const auto item : buffer.items)
@@ -16,19 +14,6 @@ GLBuffer::GLBuffer(const Buffer &buffer, GLRenderSession &renderSession)
                 if (auto field = static_cast<const Block *>(item))
                     mUsedItems += field->id;
         }
-}
-
-void GLBuffer::updateUntitledFilename(const GLBuffer &rhs)
-{
-    if (mSize == rhs.mSize && FileDialog::isEmptyOrUntitled(mFileName)
-        && FileDialog::isEmptyOrUntitled(rhs.mFileName))
-        mFileName = rhs.mFileName;
-}
-
-bool GLBuffer::operator==(const GLBuffer &rhs) const
-{
-    return std::tie(mFileName, mSize, mMessages)
-        == std::tie(rhs.mFileName, rhs.mSize, rhs.mMessages);
 }
 
 QByteArray &GLBuffer::getWriteableData()
@@ -42,13 +27,11 @@ QByteArray &GLBuffer::getWriteableData()
 void GLBuffer::clear()
 {
     auto &gl = GLContext::currentContext();
-    if (auto gl43 = check(gl.v4_3, mItemId, mMessages)) {
-        auto data = uint8_t();
-        gl.glBindBuffer(GL_ARRAY_BUFFER, getReadWriteBufferId());
-        gl43->glClearBufferData(GL_ARRAY_BUFFER, GL_R8, GL_RED,
-            GL_UNSIGNED_BYTE, &data);
-        gl.glBindBuffer(GL_ARRAY_BUFFER, GL_NONE);
-    }
+    auto data = uint8_t();
+    gl.glBindBuffer(GL_ARRAY_BUFFER, getReadWriteBufferId());
+    gl.glClearBufferData(GL_ARRAY_BUFFER, GL_R8, GL_RED, GL_UNSIGNED_BYTE,
+        &data);
+    gl.glBindBuffer(GL_ARRAY_BUFFER, GL_NONE);
 }
 
 void GLBuffer::copy(GLBuffer &source)
@@ -64,12 +47,9 @@ void GLBuffer::copy(GLBuffer &source)
 
 bool GLBuffer::swap(GLBuffer &other)
 {
-    if (mSize != other.mSize)
+    if (!BufferBase::swap(other))
         return false;
-    mData.swap(other.mData);
     std::swap(mBufferObject, other.mBufferObject);
-    std::swap(mSystemCopyModified, other.mSystemCopyModified);
-    std::swap(mDeviceCopyModified, other.mDeviceCopyModified);
     return true;
 }
 
@@ -121,8 +101,8 @@ void GLBuffer::reload()
     if (!mFileName.isEmpty())
         if (!Singletons::fileCache().getBinary(mFileName, &mData))
             if (!FileDialog::isEmptyOrUntitled(mFileName))
-                mMessages += MessageList::insert(mItemId,
-                    MessageType::LoadingFileFailed, mFileName);
+                mMessages.insert(mItemId, MessageType::LoadingFileFailed,
+                    mFileName);
 
     if (mSize > mData.size())
         mData.append(QByteArray(mSize - mData.size(), 0));
@@ -165,16 +145,15 @@ void GLBuffer::upload()
     mSystemCopyModified = mDeviceCopyModified = false;
 }
 
-bool GLBuffer::download(bool checkModification)
+void GLBuffer::beginDownload(GLContext &gl, bool checkModification)
 {
     if (!mDeviceCopyModified)
-        return false;
+        return;
 
     auto prevData = QByteArray();
     if (checkModification)
         prevData = mData;
 
-    auto &gl = GLContext::currentContext();
     gl.glBindBuffer(GL_ARRAY_BUFFER, mBufferObject);
     gl.glGetBufferSubData(GL_ARRAY_BUFFER, 0, mSize, mData.data());
     gl.glBindBuffer(GL_ARRAY_BUFFER, GL_NONE);
@@ -183,7 +162,12 @@ bool GLBuffer::download(bool checkModification)
 
     if (checkModification && prevData == mData) {
         mData = prevData;
-        return false;
+        return;
     }
-    return true;
+    mDownloaded = true;
+}
+
+bool GLBuffer::finishDownload()
+{
+    return std::exchange(mDownloaded, false);
 }

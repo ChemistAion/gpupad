@@ -3,9 +3,7 @@
 #include "DockWindow.h"
 #include "EditActions.h"
 #include "FileDialog.h"
-#include "SourceType.h"
-#include <QList>
-#include <QMap>
+#include "session/Item.h"
 #include <QStack>
 
 class IEditor;
@@ -19,6 +17,16 @@ class BinaryEditorToolBar;
 class SourceEditorToolBar;
 class QmlView;
 using ScriptEnginePtr = std::shared_ptr<class ScriptEngine>;
+
+enum class EditorType {
+    None,
+    Text,
+    Script,
+    Shader,
+    Texture,
+    Binary,
+    QmlView,
+};
 
 class EditorManager final : public DockWindow
 {
@@ -34,15 +42,19 @@ public:
         SourceType sourceType = SourceType::PlainText);
     BinaryEditor *openNewBinaryEditor(const QString &fileName);
     TextureEditor *openNewTextureEditor(const QString &fileName);
+    IEditor *openEditor(const FileItem &item);
     IEditor *openEditor(const QString &fileName, bool asBinaryFile = false);
-    SourceEditor *openSourceEditor(const QString &fileName, int line = -1,
-        int column = -1);
-    BinaryEditor *openBinaryEditor(const QString &fileName);
-    TextureEditor *openTextureEditor(const QString &fileName);
+    SourceEditor *openSourceEditor(const QString &fileName,
+        bool loadOrCreate = false, int line = -1, int column = -1);
+    BinaryEditor *openBinaryEditor(const QString &fileName,
+        bool loadOrCreate = false);
+    TextureEditor *openTextureEditor(const QString &fileName,
+        bool loadOrCreate = false);
     QmlView *openQmlView(const QString &fileName,
         const ScriptEnginePtr &enginePtr = {});
     void setAutoRaise(bool raise) { mAutoRaise = raise; }
 
+    EditorType getEditorType(const QString &fileName);
     IEditor *getEditor(const QString &fileName);
     SourceEditor *getSourceEditor(const QString &fileName);
     BinaryEditor *getBinaryEditor(const QString &fileName);
@@ -94,6 +106,7 @@ private:
     int getFocusedEditorIndex() const;
     bool focusEditorByIndex(int index, bool wrap);
     IEditor *currentEditor();
+    IEditor *getEditor(const QDockWidget *dock);
     QDockWidget *findEditorDock(const IEditor *editor) const;
     void closeUntitledUntouchedSourceEditor();
     void addSourceEditor(SourceEditor *editor);

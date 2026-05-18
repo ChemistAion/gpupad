@@ -1,11 +1,10 @@
 #include "ProcessSource.h"
-#include "ShaderPrintf.h"
-#include "Settings.h"
 #include "Singletons.h"
 #include "FileCache.h"
 #include "SynchronizeLogic.h"
-#include "opengl/GLShader.h"
+#include "opengl/GLProgram.h"
 #include "vulkan/VKShader.h"
+#include "direct3d/D3DShader.h"
 #include "session/SessionModel.h"
 #include "scripting/ScriptEngine.h"
 #include <QRegularExpression>
@@ -17,33 +16,64 @@ namespace {
             QRegularExpression::MultilineOption);
 
         for (auto match = regex.match(source); match.hasMatch();
-             match = regex.match(source))
+            match = regex.match(source))
             source.remove(match.capturedStart(), match.capturedLength());
         return source;
     }
 
-    const Item *findShaderInSession(const QString &fileName)
+    const Shader *findShaderInSession(const Shader &shader)
     {
-        auto shader = std::add_pointer_t<const Shader>();
+        // also find shader with other shader type
+        auto result = std::add_pointer_t<const Shader>();
         Singletons::sessionModel().forEachItem([&](const Item &item) {
-            if (auto s = castItem<Shader>(item))
-                if (s->fileName == fileName)
-                    shader = s;
+            if (auto sessionShader = castItem<Shader>(item))
+                if (sessionShader->fileName == shader.fileName)
+                    if (!result
+                        || sessionShader->shaderType == shader.shaderType)
+                        result = sessionShader;
         });
-        return shader;
+        return result;
     }
 
-    QList<const Shader *> getShadersInSession(const QString &fileName)
+    Shader::ShaderType getStage(Shader::ShaderType type)
     {
-        auto shaders = QList<const Shader *>();
-        if (auto currentShader =
-                castItem<Shader>(findShaderInSession(fileName)))
-            if (auto program = castItem<Program>(currentShader->parent))
-                for (auto child : program->items)
-                    if (auto shader = castItem<Shader>(child))
-                        if (shader->shaderType == currentShader->shaderType)
-                            shaders.append(shader);
-        return shaders;
+        using ST = Shader::ShaderType;
+        switch (type) {
+        case ST::Vertex:
+        case ST::Geometry:
+        case ST::TessControl:
+        case ST::TessEvaluation: return ST::Vertex;
+        default:                 return type;
+        }
+    }
+
+    void getShadersFromSession(Shader &shader, QList<const Shader *> &shaders,
+        bool linkingProgram)
+    {
+        if (auto sessionShader = findShaderInSession(shader)) {
+            const auto program = castItem<Program>(sessionShader->parent);
+            for (auto item : program->items)
+                if (auto child = castItem<Shader>(item)) {
+                    if (child == sessionShader) {
+                        // copy everything but type from session shader
+                        const auto shaderType = shader.shaderType;
+                        shader = *child;
+                        shader.shaderType = shaderType;
+                        shaders.append(&shader);
+                    } else {
+                        // add other shaders of program with same stage
+                        if (child->shaderType == shader.shaderType) {
+                            shaders.append(child);
+                        } else if (linkingProgram
+                            && getStage(child->shaderType)
+                                == getStage(shader.shaderType)) {
+                            shaders.append(child);
+                        }
+                    }
+                }
+        } else {
+            shaders.append(&shader);
+        }
     }
 } // namespace
 
@@ -55,7 +85,6 @@ ProcessSource::ProcessSource(RendererPtr renderer, QObject *parent)
 ProcessSource::~ProcessSource()
 {
     releaseResources();
-    Q_ASSERT(!mShader);
 }
 
 void ProcessSource::setFileName(QString fileName)
@@ -85,105 +114,148 @@ void ProcessSource::clearMessages()
 
 void ProcessSource::prepare(bool itemsChanged, EvaluationType)
 {
-    if (auto shaderType = getShaderType(mSourceType)) {
-        auto shaders = getShadersInSession(mFileName);
-        // ensure shader is in list
-        auto shader = Shader{};
-        if (shaders.empty()) {
-            shader.fileName = mFileName;
-            shader.language = Shader::Language::GLSL;
-            shaders = { &shader };
-        }
-        // replace shader's type and language
-        for (auto &s : shaders)
-            if (s->fileName == mFileName) {
-                shader = *s;
-                shader.shaderType = shaderType;
-                shader.language = getShaderLanguage(mSourceType);
-                s = &shader;
-                break;
-            }
+    auto shaderType = getShaderType(mSourceType);
+    if (shaderType)
+        prepareShader(shaderType);
+}
 
-        auto session = Singletons::sessionModel().sessionItem();
+void ProcessSource::prepareShader(Shader::ShaderType shaderType)
+{
+    auto session = Singletons::sessionModel().sessionItem();
+    session.shaderLanguage = getShaderLanguage(mSourceType);
 
-        // define state of hidden session properties
-        const auto hasVulkanRenderer = (session.renderer == "Vulkan");
-        const auto hasShaderCompiler =
-            (!session.shaderCompiler.isEmpty() || hasVulkanRenderer);
-        if (!hasShaderCompiler) {
-            session.autoMapBindings = true;
-            session.autoMapLocations = true;
-        }
+    const auto linkingProgram = [&]() {
+        if (session.renderer != Session::Renderer::OpenGL)
+            return false;
+        return ((mValidateSource && mProcessType.isEmpty())
+            || mProcessType == "programBinary"
+            || mProcessType == "json");
+    }();
 
-        // always target Vulkan when generating JSON, otherwise SpvReflect cannot enumerate uniforms
-        if (session.renderer == "Vulkan" || mProcessType == "json") {
-            mShader = std::make_unique<VKShader>(shaderType, shaders, session);
+    auto shader = Shader{};
+    auto shaders = QList<const Shader *>();
+    shader.type = Item::Type::Shader;
+    shader.fileName = mFileName;
+    shader.shaderType = shaderType;
+    getShadersFromSession(shader, shaders, linkingProgram);
+
+    // define state of hidden session properties
+    const auto hasShaderCompiler =
+        (session.shaderCompiler != Session::ShaderCompiler::Driver
+            || session.renderer == Session::Renderer::Vulkan);
+    if (!hasShaderCompiler) {
+        setShaderCompilerSetting(session,
+            Session::ShaderCompilerSetting::autoMapBindings, true);
+        setShaderCompilerSetting(session,
+            Session::ShaderCompilerSetting::autoMapLocations, true);
+    }
+
+    switch (session.renderer) {
+    case Session::Renderer::OpenGL: {
+        if (linkingProgram) {
+            auto program = Program{};
+            for (auto shader : shaders)
+                program.items.append(const_cast<Shader *>(shader));
+            mGLProgram = std::make_unique<GLProgram>(program, session);
         } else {
             mShader = std::make_unique<GLShader>(shaderType, shaders, session);
         }
+        break;
+    }
+
+    default:
+    case Session::Renderer::Vulkan:
+        mShader = std::make_unique<VKShader>(shaderType, shaders, session);
+        break;
+
+#if defined(_WIN32)
+    case Session::Renderer::Direct3D:
+        mShader = std::make_unique<D3DShader>(shaderType, shaders, session);
+        break;
+#endif
     }
 }
 
 void ProcessSource::render()
 {
-    auto messages = MessagePtrSet();
+    [[maybe_unused]] auto prevMessages = std::exchange(mMessages, {});
     mOutput.clear();
 
-    if (mValidateSource) {
-        if (mShader) {
-            auto printf = RemoveShaderPrintf();
-            if (renderer().api() == RenderAPI::OpenGL) {
-                if (auto shader = static_cast<GLShader *>(mShader.get()))
-                    if (shader->compile(printf)) {
-                        // try to link and if it also succeeds,
-                        // output messages from linking to get potential warnings
-                        tryGetLinkerWarnings(*shader, messages);
-                    }
-            } else {
-                mShader->compileSpirv(printf);
-            }
-        } else if (mSourceType == SourceType::JavaScript) {
-            const auto basePath = QFileInfo(mFileName).absolutePath();
-            auto scriptEngine = ScriptEngine::make(basePath);
-            auto scriptSource = QString();
-            Singletons::fileCache().getSource(mFileName, &scriptSource);
-            scriptEngine->validateScript(scriptSource, mFileName);
-            messages += scriptEngine->resetMessages();
-        }
+    if (mValidateSource)
+        validate();
+
+    if (!mProcessType.isEmpty()) {
+        if (auto string = processString(); !string.isEmpty())
+            mOutput = string;
+        else if (auto binary = processBinary(); !binary.isEmpty())
+            mOutput = binary;
     }
 
-    if (mShader && !mProcessType.isEmpty()) {
-        if (mProcessType == "preprocess") {
-            mOutput = removeLineDirectives(mShader->preprocess());
-        } else if (mProcessType == "spirv") {
-            mOutput = mShader->generateReadableSpirv();
-        } else if (mProcessType == "spirvBinary") {
-            mOutput = mShader->generateBinarySpirv();
-        } else if (mProcessType == "ast") {
-            mOutput = mShader->generateGLSLangAST();
-        } else if (mProcessType == "assembly") {
-            if (renderer().api() == RenderAPI::OpenGL)
-                if (auto shader = static_cast<GLShader *>(mShader.get())) {
-                    auto printf = RemoveShaderPrintf();
-                    if (shader->compile(printf))
-                        mOutput = tryGetProgramBinary(*shader);
-                }
-        } else if (mProcessType == "json") {
-            mOutput = mShader->getJsonInterface();
-        }
-        if (!mOutput.isValid())
-            mOutput = "not available";
-    }
+    if (mGLProgram && mValidateSource)
+        mMessages += mGLProgram->resetMessages();
+    mGLProgram.reset();
 
-    if (mShader) {
-        messages += mShader->resetMessages();
-        mShader.reset();
+    if (mShader && mValidateSource)
+        mMessages += mShader->resetMessages();
+    mShader.reset();
+}
+
+void ProcessSource::validate()
+{
+    if (mGLProgram) {
+        mGLProgram->validate();
+    } else if (mShader) {
+        mShader->validate();
+    } else if (mSourceType == SourceType::JavaScript) {
+        const auto basePath = QFileInfo(mFileName).absoluteDir();
+        auto scriptEngine = ScriptEngine::make(basePath);
+        auto scriptSource = QString();
+        Singletons::fileCache().getSource(mFileName, &scriptSource);
+        scriptEngine->validateScript(scriptSource, mFileName);
+        mMessages += scriptEngine->resetMessages();
     }
-    mMessages = messages;
+}
+
+QString ProcessSource::processString()
+{
+    if (mProcessType == "preprocess" && mShader)
+        return removeLineDirectives(mShader->preprocess());
+
+    if (mProcessType == "glsl" && mShader)
+        return mShader->generateGLSL();
+
+    if (mProcessType == "hlsl" && mShader)
+        return mShader->generateHLSL();
+
+    if (mProcessType == "spirv" && mShader)
+        return mShader->disassemble();
+
+    if (mProcessType == "ast" && mShader)
+        return mShader->generateGLSLangAST();
+
+    if (mProcessType == "programBinary" && mGLProgram)
+        return mGLProgram->tryGetProgramBinary();
+
+    if (mProcessType == "json") {
+        if (mGLProgram && mGLProgram->validate())
+            return getJsonString(mGLProgram->reflection());
+
+        if (mShader)
+            return getJsonString(mShader->getReflection());
+    }
+    return {};
+}
+
+QByteArray ProcessSource::processBinary()
+{
+    if (mProcessType == "spirvBinary" && mShader)
+        if (const auto spirv = mShader->compileSpirv(); !spirv.empty())
+            return QByteArray(reinterpret_cast<const char *>(spirv.data()),
+                spirv.size() * sizeof(uint32_t));
+    return {};
 }
 
 void ProcessSource::finish()
 {
-    if (mOutput.isValid())
-        Q_EMIT outputChanged(mOutput);
+    Q_EMIT outputChanged(mOutput);
 }

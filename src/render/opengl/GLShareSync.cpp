@@ -1,0 +1,52 @@
+
+#include "GLShareSync.h"
+
+void GLShareSync::cleanup(QOpenGLFunctions_4_5_Core &gl)
+{
+    QMutexLocker lock{ &mMutex };
+
+    if (mUpdateFenceSync)
+        gl.glDeleteSync(mUpdateFenceSync);
+    mUpdateFenceSync = {};
+
+    for (const auto &usageSync : std::as_const(mUsageFenceSyncs))
+        gl.glDeleteSync(usageSync);
+    mUsageFenceSyncs.clear();
+}
+
+void GLShareSync::beginUpdate(QOpenGLFunctions_4_5_Core &gl)
+{
+    mMutex.lock();
+    // synchronize with end of usage
+    for (const auto &usageSync : std::as_const(mUsageFenceSyncs)) {
+        gl.glWaitSync(usageSync, 0, GL_TIMEOUT_IGNORED);
+        gl.glDeleteSync(usageSync);
+    }
+    mUsageFenceSyncs.clear();
+}
+
+void GLShareSync::endUpdate(QOpenGLFunctions_4_5_Core &gl)
+{
+    // mark end of update
+    if (mUpdateFenceSync)
+        gl.glDeleteSync(mUpdateFenceSync);
+    mUpdateFenceSync = gl.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.glFlush();
+    mMutex.unlock();
+}
+
+void GLShareSync::beginUsage(QOpenGLFunctions_4_5_Core &gl)
+{
+    mMutex.lock();
+    // synchronize with end of update
+    if (mUpdateFenceSync)
+        gl.glWaitSync(mUpdateFenceSync, 0, GL_TIMEOUT_IGNORED);
+}
+
+void GLShareSync::endUsage(QOpenGLFunctions_4_5_Core &gl)
+{
+    // mark end of usage
+    mUsageFenceSyncs.append(gl.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0));
+    gl.glFlush();
+    mMutex.unlock();
+}

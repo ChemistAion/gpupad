@@ -15,20 +15,20 @@ void QmlView::reset() { }
 #else // defined(QtQuick_FOUND)
 
 #  include "FileCache.h"
+#  include "FileDialog.h"
 #  include "Singletons.h"
 #  include "Settings.h"
 #  include "scripting/ScriptEngine.h"
 #  include <QBoxLayout>
 #  include <QDir>
-#  include <QFileInfo>
 #  include <QNetworkAccessManager>
 #  include <QNetworkReply>
 #  include <QQmlAbstractUrlInterceptor>
 #  include <QQmlNetworkAccessManagerFactory>
 #  include <QQmlEngine>
-#  include <QQuickWidget>
 #  include <QQuickStyle>
 #  include <QApplication>
+#  include <QQuickView>
 #  include <cstring>
 
 namespace {
@@ -135,15 +135,13 @@ QmlView::QmlView(QString fileName, QScriptEnginePtr enginePtr, QWidget *parent)
     , mEnginePtr(std::move(enginePtr))
 {
     Q_ASSERT(onMainThread());
-    QQuickStyle::setStyle("Fusion");
+    [[maybe_unused]] static const auto once = []() {
+        QQuickStyle::setStyle("Fusion");
+        return true;
+    }();
 
-    if (!mEnginePtr) {
-        const auto basePath = QFileInfo(fileName).absolutePath();
-        mEnginePtr = ScriptEngine::make(basePath, thread(), this);
-    }
-    // WORKAROUND: tell QQuickWidget to also use OpenGL for rendering and not turn black
-    // see: https://forum.qt.io/topic/148089/qopenglwidget-doesn-t-work-with-qquickwidget
-    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    if (!mEnginePtr)
+        mEnginePtr = ScriptEngine::make(fileName, thread(), this);
 
     auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -157,6 +155,12 @@ QmlView::QmlView(QString fileName, QScriptEnginePtr enginePtr, QWidget *parent)
 
     static UrlInterceptor sUrlInterceptor;
     qmlEngine->addUrlInterceptor(&sUrlInterceptor);
+
+    auto qmlDirs = getApplicationDirectories("qml");
+    std::reverse(qmlDirs.begin(), qmlDirs.end());
+    for (const auto &dir : std::as_const(qmlDirs))
+        qmlEngine->addImportPath(dir.path());
+
     qmlEngine->addImportPath(QFileInfo(mFileName).dir().path());
 
     connect(&Singletons::settings(), &Settings::windowThemeChanged, this,
@@ -165,15 +169,19 @@ QmlView::QmlView(QString fileName, QScriptEnginePtr enginePtr, QWidget *parent)
 
 void QmlView::windowThemeChanged(const Theme &theme)
 {
-    if (mQuickWidget)
-        mQuickWidget->setClearColor(qApp->palette().toolTipBase().color());
+    mQuickView->setColor(backgroundColor());
+}
+
+QColor QmlView::backgroundColor() const
+{
+    return qApp->palette().alternateBase().color();
 }
 
 void QmlView::reset()
 {
     if (mQuickWidget) {
         layout()->removeWidget(mQuickWidget);
-        connect(mQuickWidget, &QQuickWidget::destroyed, this, &QmlView::reset,
+        connect(mQuickWidget, &QWidget::destroyed, this, &QmlView::reset,
             Qt::QueuedConnection);
         mQuickWidget->deleteLater();
         mQuickWidget = nullptr;
@@ -186,39 +194,34 @@ void QmlView::reset()
     Q_ASSERT(qmlEngine);
     qmlEngine->clearComponentCache();
 
-    mQuickWidget = new QQuickWidget(qmlEngine, this);
-    mQuickWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    mQuickWidget->setClearColor(qApp->palette().toolTipBase().color());
+    mQuickView = new QQuickView(qmlEngine, nullptr);
+    mQuickView->setResizeMode(QQuickView::SizeRootObjectToView);
+    mQuickView->setColor(backgroundColor());
+    mQuickView->setFormat(QSurfaceFormat::defaultFormat());
 
-#if defined(_WIN32)
-    // WORKAROUND: reapply current palette, to fix Fusion theme
-    auto palette = qApp->palette();
-    qApp->setPalette(QPalette());
-    qApp->setPalette(palette);
-#else
-    // on Linux some more needs to be reapplied (very slow on Windows)
-    qApp->setPalette(QPalette());
-    Singletons::settings().setWindowTheme(Singletons::settings().windowTheme());
-#endif
-
-    connect(mQuickWidget, &QQuickWidget::statusChanged,
-        [this, widget = mQuickWidget](QQuickWidget::Status status) {
-            if (status == QQuickWidget::Error) {
-                const auto errors = widget->errors();
-                for (const QQmlError &error : errors)
-                    mMessages += MessageList::insert(
-                        toAbsolutePath(error.url()), error.line(),
-                        MessageType::ScriptError, error.description());
+    connect(mQuickView, &QQuickView::statusChanged,
+        [this](QQuickView::Status status) {
+            if (status == QQuickView::Error) {
+                const auto errors = mQuickView->errors();
+                for (const QQmlError &error : errors) {
+                    const auto fileName = toAbsolutePath(error.url());
+                    if (!QFileInfo(fileName).isFile() && error.line() < 0) {
+                        mMessages.insert(0, 0, MessageType::LoadingFileFailed,
+                            fileName);
+                    } else {
+                        mMessages.insert(fileName, error.line(),
+                            MessageType::ScriptError, error.description());
+                    }
+                }
             }
         });
 
-    connect(mQuickWidget, &QQuickWidget::sceneGraphError,
+    connect(mQuickView, &QQuickView::sceneGraphError,
         [this](QQuickWindow::SceneGraphError error, const QString &message) {
-            mMessages += MessageList::insert(mFileName, 0,
-                MessageType::ScriptError, message);
+            mMessages.insert(mFileName, 0, MessageType::ScriptError, message);
         });
 
-    connect(mQuickWidget->engine(), &QQmlEngine::warnings,
+    connect(qmlEngine, &QQmlEngine::warnings,
         [this](const QList<QQmlError> &warnings) {
             for (const auto &warning : warnings) {
                 auto fileName = toAbsolutePath(warning.url());
@@ -227,13 +230,15 @@ void QmlView::reset()
                     fileName = mFileName;
                     line = 0;
                 }
-                mMessages += MessageList::insert(fileName, line,
-                    MessageType::ScriptWarning, warning.description());
+                mMessages.insert(fileName, line, MessageType::ScriptWarning,
+                    warning.description());
             }
         });
 
     Singletons::fileCache().updateFromEditors();
-    mQuickWidget->setSource(QUrl::fromLocalFile(mFileName));
+
+    mQuickView->setSource(QUrl::fromLocalFile(mFileName));
+    mQuickWidget = QWidget::createWindowContainer(mQuickView);
 
     layout()->addWidget(mQuickWidget);
 }
@@ -282,6 +287,11 @@ bool QmlView::save()
 }
 
 void QmlView::setModified() { }
+
+QString QmlView::actionId() const
+{
+    return mEnginePtr->actionId();
+}
 
 void QmlView::addDependency(const QString &fileName)
 {

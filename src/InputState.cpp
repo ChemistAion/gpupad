@@ -1,5 +1,6 @@
 
 #include "InputState.h"
+#include <QDateTime>
 #include <QSet>
 
 namespace {
@@ -89,9 +90,10 @@ InputState::InputState()
 {
     mMouseButtonStates.resize(5);
     mKeyStates.resize(256);
+    reset();
 }
 
-void InputState::update()
+void InputState::update(EvaluationType evaluationType)
 {
     mEditorSize = mNextEditorSize;
     mPrevMousePosition = mMousePosition;
@@ -125,22 +127,75 @@ void InputState::update()
     };
     updateButtonStates(mNextMouseButtonStates, mMouseButtonStates);
     updateButtonStates(mNextKeyStates, mKeyStates);
+
+    const auto now = Clock::now();
+    mFrameIndex += 1;
+    switch (evaluationType) {
+    case EvaluationType::Reset:
+        mFrameIndex = 0;
+        mTime = 0;
+        break;
+
+    case EvaluationType::Automatic:
+        // do not advance time
+        break;
+
+    case EvaluationType::Manual:
+        mTime += mManualTimeStep;
+        break;
+
+    case EvaluationType::Steady:
+        if (mLastUpdateTime.time_since_epoch().count() > 0)
+            mTime += std::chrono::duration<double>(now - mLastUpdateTime).count();
+        break;
+    }
+
+    // only measure elapsed time between two steady evaluations
+    mLastUpdateTime = (evaluationType == EvaluationType::Steady ?
+        now : Clock::time_point());
+
+    Q_EMIT frameIndexChanged(mFrameIndex);
+    Q_EMIT timeChanged(mTime);
+}
+
+void InputState::setFrameIndex(int frameIndex)
+{
+    if (std::exchange(mFrameIndex, frameIndex) != frameIndex)
+        Q_EMIT frameIndexChanged(mFrameIndex);
+}
+
+void InputState::setTime(double time)
+{
+    if (std::exchange(mTime, time) != time)
+        Q_EMIT timeChanged(mTime);
+}
+
+void InputState::reset()
+{
+    mFrameIndex = 0;
+    mTime = 0;
+}
+
+void InputState::restoreEditorSize(QSize size)
+{
+    mNextEditorSize = mEditorSize = size;
 }
 
 void InputState::setEditorSize(QSize size)
 {
-    if (mNextEditorSize != size) {
-        mNextEditorSize = size;
+    if (std::exchange(mNextEditorSize, size) != size)
         Q_EMIT mouseChanged();
-    }
+}
+
+void InputState::restoreMousePosition(const QPoint &position)
+{
+    mNextMousePosition = mPrevMousePosition = mMousePosition = position;
 }
 
 void InputState::setMousePosition(const QPoint &position)
 {
-    if (mNextMousePosition != position) {
-        mNextMousePosition = position;
+    if (std::exchange(mNextMousePosition, position) != position)
         Q_EMIT mouseChanged();
-    }
 }
 
 void InputState::setMouseButtonPressed(Qt::MouseButton button)

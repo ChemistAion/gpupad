@@ -104,8 +104,7 @@ Qt::ItemFlags SessionModel::flags(const QModelIndex &index) const
     flags |= Qt::ItemIsEnabled;
     flags |= Qt::ItemIsEditable;
     flags |= Qt::ItemIsUserCheckable;
-    if (type != Item::Type::Session)
-        flags |= Qt::ItemIsDragEnabled;
+    flags |= Qt::ItemIsDragEnabled;
     switch (type) {
     case Item::Type::Root:
     case Item::Type::Session:
@@ -130,6 +129,10 @@ Qt::ItemFlags SessionModel::flags(const QModelIndex &index) const
 
 bool SessionModel::removeRows(int row, int count, const QModelIndex &parent)
 {
+    // do not allow to move Session
+    if (!parent.isValid())
+        return false;
+
     SessionModelCore::removeRows(row, count, parent);
     mDraggedIndices.clear();
     return true;
@@ -216,7 +219,6 @@ QJsonArray SessionModel::generateJsonFromUrls(QModelIndex target,
             item.type = Item::Type::Shader;
             const auto sourceType = deduceSourceType(SourceType::PlainText,
                 FileDialog::getFileExtension(fileName), "");
-            item.language = getShaderLanguage(sourceType);
             item.shaderType = getShaderType(sourceType);
             addFileItem(item, url);
         } else if (canContainType(target, Item::Type::Script)
@@ -226,7 +228,8 @@ QJsonArray SessionModel::generateJsonFromUrls(QModelIndex target,
             addFileItem(item, url);
         } else if (canContainType(target, Item::Type::Texture)
             && (FileDialog::isTextureFileName(fileName)
-                || FileDialog::isVideoFileName(fileName))) {
+                || FileDialog::isVideoFileName(fileName)
+                || FileDialog::isSequenceFileName(fileName))) {
             auto item = Texture();
             item.type = Item::Type::Texture;
             addFileItem(item, url);
@@ -234,7 +237,8 @@ QJsonArray SessionModel::generateJsonFromUrls(QModelIndex target,
             && !FileDialog::isShaderFileName(fileName)
             && !FileDialog::isScriptFileName(fileName)
             && !FileDialog::isTextureFileName(fileName)
-            && !FileDialog::isVideoFileName(fileName)) {
+            && !FileDialog::isVideoFileName(fileName)
+            && !FileDialog::isSequenceFileName(fileName)) {
             auto item = Buffer();
             item.type = Item::Type::Buffer;
             addFileItem(item, url);
@@ -370,6 +374,10 @@ bool SessionModel::dropMimeData(const QMimeData *data, Qt::DropAction action,
         }
     }
 
+    // do not allow to drop another Sessioon
+    if (!parent.isValid() && sessionItemIndex().isValid())
+        return false;
+
     dropJson(jsonArray, row, parent, false);
     mDraggedIndices.clear();
 
@@ -383,19 +391,20 @@ void SessionModel::clear()
     SessionModelCore::clear();
 }
 
-QJsonArray SessionModel::getJson(const QModelIndexList &indexes) const
+QJsonArray SessionModel::getJson(const QModelIndexList &indexes,
+    bool serializingScriptItem) const
 {
     auto itemArray = QJsonArray();
     if (indexes.size() == 1 && !indexes.first().isValid()) {
         for (const Item *item : getItem({}).items) {
             auto object = QJsonObject();
-            serialize(object, *item, true);
+            serialize(object, *item, true, serializingScriptItem);
             itemArray.append(object);
         }
     } else {
         for (const QModelIndex &index : indexes) {
             auto object = QJsonObject();
-            serialize(object, getItem(index), false);
+            serialize(object, getItem(index), false, serializingScriptItem);
             itemArray.append(object);
         }
     }
@@ -478,11 +487,11 @@ void SessionModel::deserialize(const QJsonObject &object,
 
         if (property == "name") {
             setData(getIndex(index, Name), value);
+        } else if (property == "custom") {
+            setData(getIndex(index, Custom), value);
         } else if (property == "fileName") {
-            const auto absolutePath =
-                QDir::current().absoluteFilePath(value.toString());
             setData(getIndex(index, FileName),
-                toNativeCanonicalFilePath(absolutePath));
+                toNativeCanonicalAbsoluteFilePath(value.toString()));
         } else if (property == "target") {
             // TODO: remove, added for backward compatibility
             if (value == "Target2DMultisample")
@@ -511,25 +520,29 @@ void SessionModel::deserialize(const QJsonObject &object,
 }
 
 void SessionModel::serialize(QJsonObject &object, const Item &item,
-    bool relativeFilePaths) const
+    bool relativeFilePaths, bool serializingScriptItem) const
 {
     object["type"] = getTypeName(item.type);
     object["id"] = item.id;
+    object["name"] = item.name;
+    if (!item.custom.isEmpty())
+        object["custom"] = toJsonValue(item.custom);
+
     if (auto fileItem = castItem<FileItem>(item)) {
         const auto &fileName = fileItem->fileName;
         if (!fileName.isEmpty()) {
-            if (FileDialog::isUntitled(fileName)) {
+            if (FileDialog::isUntitled(fileName)
+                && !serializingScriptItem) {
                 mDraggedUntitledFileNames[item.id] = fileName;
             } else {
                 object["fileName"] = (relativeFilePaths
-                        ? QDir::fromNativeSeparators(
-                              QDir::current().relativeFilePath(fileName))
+                        ? toForwardSlashRelativeFilePath(fileName)
                         : fileName);
+                if (QFileInfo(fileName).fileName() == item.name)
+                    object.remove("name");
             }
         }
     }
-    if (!object.contains("fileName"))
-        object["name"] = item.name;
 
 #define ADD(COLUMN_TYPE, ITEM_TYPE, PROPERTY)        \
     if (item.type == Item::Type::ITEM_TYPE           \
@@ -540,7 +553,7 @@ void SessionModel::serialize(QJsonObject &object, const Item &item,
     ADD_EACH_COLUMN_TYPE()
 #undef ADD
 
-    if (!item.items.empty() && !isDynamicGroup(item)) {
+    if (!serializingScriptItem && !item.items.empty() && !isDynamicGroup(item)) {
         auto items = QJsonArray();
         for (const Item *item : item.items) {
             auto sub = QJsonObject();
@@ -558,25 +571,24 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
     switch (item.type) {
     case Item::Type::Session: {
         const auto &session = static_cast<const Session &>(item);
-        const auto hasVulkanRenderer = (session.renderer == "Vulkan");
-        const auto hasShaderCompiler =
-            (!session.shaderCompiler.isEmpty() || hasVulkanRenderer);
-        result &= (column != SessionFlipViewport || hasVulkanRenderer);
-        result &= (column != SessionReverseCulling || hasVulkanRenderer);
-        result &= (column != SessionShaderCompiler || !hasVulkanRenderer);
-        result &= (column != SessionAutoMapBindings || hasVulkanRenderer);
-        result &= (column != SessionAutoMapLocations || hasVulkanRenderer);
-        result &= (column != SessionAutoSampledTextures || hasShaderCompiler);
-        result &= (column != SessionVulkanRulesRelaxed || hasVulkanRenderer);
-        result &= (column != SessionSpirvVersion
-            || (hasShaderCompiler && session.spirvVersion != 0));
+        for (auto c : {
+                 SessionFlipViewport,
+                 SessionReverseCulling,
+             })
+            result &= (column != c || rendererHasSetting(session.renderer, c));
+        break;
+    }
+
+    case Item::Type::Group: {
+        const auto &group = static_cast<const Group &>(item);
+        result &= (column != GroupDynamic || (group.dynamic));
         break;
     }
 
     case Item::Type::Shader: {
         const auto &shader = static_cast<const Shader &>(item);
         result &= (column != ShaderEntryPoint
-            || (shader.language != Shader::Language::GLSL));
+            || (getShaderLanguage(shader) != Session::ShaderLanguage::GLSL));
         result &= (column != ShaderPreamble || !shader.preamble.isEmpty());
         result &=
             (column != ShaderIncludePaths || !shader.includePaths.isEmpty());
@@ -747,4 +759,17 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
     default: break;
     }
     return result;
+}
+
+bool rendererHasSetting(Session::Renderer renderer,
+    SessionModel::ColumnType column)
+{
+    using R = Session::Renderer;
+    using CT = SessionModel::ColumnType;
+    switch (column) {
+    default:                        break;
+    case CT::SessionReverseCulling: return (renderer != R::OpenGL);
+    case CT::SessionFlipViewport:   return (renderer != R::OpenGL);
+    }
+    return false;
 }

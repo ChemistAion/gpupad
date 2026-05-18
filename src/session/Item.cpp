@@ -11,9 +11,9 @@ Item::Type getItemTypeByName(const QString &name, bool *ok)
     return (index < 0 ? Item::Type::Group : static_cast<Item::Type>(index));
 }
 
-int getFieldSize(const Field &field)
+int getDataTypeSize(Field::DataType dataType)
 {
-    switch (field.dataType) {
+    switch (dataType) {
     case Field::DataType::Int8:   return 1;
     case Field::DataType::Int16:  return 2;
     case Field::DataType::Int32:  return 4;
@@ -26,6 +26,11 @@ int getFieldSize(const Field &field)
     case Field::DataType::Double: return 8;
     }
     return 0;
+}
+
+int getFieldSize(const Field &field)
+{
+    return getDataTypeSize(field.dataType);
 }
 
 int getFieldRowOffset(const Field &field)
@@ -176,4 +181,45 @@ bool shouldExecute(Call::ExecuteOn executeOn, EvaluationType evaluationType)
     case Call::ExecuteOn::EveryEvaluation: break;
     }
     return true;
+}
+
+bool shaderCompilerHasSetting(const Session &session,
+    Session::ShaderCompilerSetting setting)
+{
+    return shaderCompilerHasSetting(session.shaderCompiler, session.renderer,
+        setting);
+}
+
+bool shaderCompilerHasSetting(Session::ShaderCompiler compiler,
+    Session::Renderer renderer, Session::ShaderCompilerSetting setting)
+{
+    using SC = Session::ShaderCompiler;
+    using R = Session::Renderer;
+    using SCS = Session::ShaderCompilerSetting;
+    switch (setting) {
+    case SCS::COUNT:               break;
+    case SCS::spirvVersion:        return (compiler == SC::glslang);
+    case SCS::autoMapBindings:     return (compiler == SC::glslang);
+    case SCS::autoMapLocations:    return (compiler == SC::glslang);
+    case SCS::autoSampledTextures: return (compiler == SC::glslang);
+    case SCS::vulkanRulesRelaxed:
+        return (compiler == SC::glslang && renderer != R::OpenGL);
+    }
+    return false;
+}
+
+QVariant getShaderCompilerSetting(const Session &session,
+    Session::ShaderCompilerSetting setting)
+{
+    const auto metaEnum = QMetaEnum::fromType<Session::ShaderCompilerSetting>();
+    const auto column = static_cast<int>(setting);
+    return session.shaderCompilerSettings[metaEnum.key(column)];
+}
+
+void setShaderCompilerSetting(Session &session,
+    Session::ShaderCompilerSetting setting, QVariant value)
+{
+    const auto metaEnum = QMetaEnum::fromType<Session::ShaderCompilerSetting>();
+    const auto column = static_cast<int>(setting);
+    session.shaderCompilerSettings[metaEnum.key(column)] = value;
 }

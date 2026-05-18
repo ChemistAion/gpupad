@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CallProperties</class>
+ <widget class="QWidget" name="CallProperties">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>227</width>
+    <height>696</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout">
+     <property name="labelAlignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="horizontalSpacing">
+      <number>8</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>2</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="labelName">
+       <property name="text">
+        <string>Name</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="name"/>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="labelType">
+       <property name="text">
+        <string>Type</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="DataComboBox" name="type"/>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="labelExecuteOn">
+       <property name="text">
+        <string>Execute On</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="DataComboBox" name="executeOn"/>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="labelProgram">
+       <property name="text">
+        <string>Program</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="ReferenceComboBox" name="program"/>
+     </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="labelTarget">
+       <property name="text">
+        <string>Target</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="ReferenceComboBox" name="target"/>
+     </item>
+     <item row="5" column="0">
+      <widget class="QLabel" name="labelVertexStream">
+       <property name="text">
+        <string>Vertex Stream</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="1">
+      <widget class="ReferenceComboBox" name="vertexStream"/>
+     </item>
+     <item row="6" column="0">
+      <widget class="QLabel" name="labelPrimitiveType">
+       <property name="text">
+        <string>Primitive Type</string>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="1">
+      <widget class="DataComboBox" name="primitiveType"/>
+     </item>
+     <item row="7" column="0">
+      <widget class="QLabel" name="labelPatchVertices">
+       <property name="text">
+        <string>Patch Vertices</string>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="1">
+      <widget class="ExpressionLineEdit" name="patchVertices"/>
+     </item>
+     <item row="8" column="0">
+      <widget class="QLabel" name="labelVertexCount">
+       <property name="text">
+        <string>Vertex Count</string>
+       </property>
+      </widget>
+     </item>
+     <item row="8" column="1">
+      <widget class="ExpressionLineEdit" name="vertexCount">
+       <property name="placeholderText">
+        <string>max.</string>
+       </property>
+      </widget>
+     </item>
+     <item row="9" column="0">
+      <widget class="QLabel" name="labelFirstVertex">
+       <property name="text">
+        <string>First Vertex</string>
+       </property>
+      </widget>
+     </item>
+     <item row="9" column="1">
+      <widget class="ExpressionLineEdit" name="firstVertex"/>
+     </item>
+     <item row="10" column="0">
+      <widget class="QLabel" name="labelIndexBufferBlock">
+       <property name="text">
+        <string>Indices Block</string>
+       </property>
+      </widget>
+     </item>
+     <item row="10" column="1">
+      <widget class="ReferenceComboBox" name="indexBufferBlock"/>
+     </item>
+     <item row="11" column="0">
+      <widget class="QLabel" name="labelBaseVertex">
+       <property name="text">
+        <string>Base Vertex</string>
+       </property>
+      </widget>
+     </item>
+     <item row="11" column="1">
+      <widget class="ExpressionLineEdit" name="baseVertex"/>
+     </item>
+     <item row="12" column="0">
+      <widget class="QLabel" name="labelInstanceCount">
+       <property name="text">
+        <string>Instance Count</string>
+       </property>
+      </widget>
+     </item>
+     <item row="12" column="1">
+      <widget class="ExpressionLineEdit" name="instanceCount"/>
+     </item>
+     <item row="13" column="0">
+      <widget class="QLabel" name="labelBaseInstance">
+       <property name="text">
+        <string>Base Instance</string>
+       </property>
+      </widget>
+     </item>
+     <item row="13" column="1">
+      <widget class="ExpressionLineEdit" name="baseInstance"/>
+     </item>
+     <item row="14" column="1">
+      <widget class="ReferenceComboBox" name="indirectBufferBlock"/>
+     </item>
+     <item row="16" column="0">
+      <widget class="QLabel" name="labelDrawCount">
+       <property name="text">
+        <string>Draw Count</string>
+       </property>
+      </widget>
+     </item>
+     <item row="16" column="1">
+      <widget class="ExpressionLineEdit" name="drawCount"/>
+     </item>
+     <item row="17" column="0">
+      <widget class="QLabel" name="labelWorkGroupsX">
+       <property name="text">
+        <string>Work Groups X</string>
+       </property>
+      </widget>
+     </item>
+     <item row="17" column="1">
+      <widget class="ExpressionLineEdit" name="workGroupsX"/>
+     </item>
+     <item row="18" column="0">
+      <widget class="QLabel" name="labelWorkGroupsY">
+       <property name="text">
+        <string>Y</string>
+       </property>
+      </widget>
+     </item>
+     <item row="18" column="1">
+      <widget class="ExpressionLineEdit" name="workGroupsY"/>
+     </item>
+     <item row="19" column="0">
+      <widget class="QLabel" name="labelWorkGroupsZ">
+       <property name="text">
+        <string>Z</string>
+       </property>
+      </widget>
+     </item>
+     <item row="19" column="1">
+      <widget class="ExpressionLineEdit" name="workGroupsZ"/>
+     </item>
+     <item row="20" column="0">
+      <widget class="QLabel" name="labelBuffer">
+       <property name="text">
+        <string>Buffer</string>
+       </property>
+      </widget>
+     </item>
+     <item row="20" column="1">
+      <widget class="ReferenceComboBox" name="buffer"/>
+     </item>
+     <item row="21" column="0">
+      <widget class="QLabel" name="labelFromBuffer">
+       <property name="text">
+        <string>From Buffer</string>
+       </property>
+      </widget>
+     </item>
+     <item row="21" column="1">
+      <widget class="ReferenceComboBox" name="fromBuffer"/>
+     </item>
+     <item row="22" column="0">
+      <widget class="QLabel" name="labelTexture">
+       <property name="text">
+        <string>Texture</string>
+       </property>
+      </widget>
+     </item>
+     <item row="22" column="1">
+      <widget class="ReferenceComboBox" name="texture"/>
+     </item>
+     <item row="23" column="0">
+      <widget class="QLabel" name="labelFromTexture">
+       <property name="text">
+        <string>From Texture</string>
+       </property>
+      </widget>
+     </item>
+     <item row="23" column="1">
+      <widget class="ReferenceComboBox" name="fromTexture"/>
+     </item>
+     <item row="24" column="0">
+      <widget class="QLabel" name="labelClearColor">
+       <property name="text">
+        <string>Clear Color</string>
+       </property>
+      </widget>
+     </item>
+     <item row="24" column="1">
+      <widget class="ColorPicker" name="clearColor">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>24</height>
+        </size>
+       </property>
+      </widget>
+     </item>
+     <item row="25" column="0">
+      <widget class="QLabel" name="labelClearDepth">
+       <property name="text">
+        <string>Clear Depth</string>
+       </property>
+      </widget>
+     </item>
+     <item row="25" column="1">
+      <widget class="QDoubleSpinBox" name="clearDepth">
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="minimum">
+        <double>0.000000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>1.000000000000000</double>
+       </property>
+       <property name="singleStep">
+        <double>0.001000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="26" column="0">
+      <widget class="QLabel" name="labelClearStencil">
+       <property name="text">
+        <string>Clear Stencil</string>
+       </property>
+      </widget>
+     </item>
+     <item row="26" column="1">
+      <widget class="QSpinBox" name="clearStencil">
+       <property name="maximum">
+        <number>255</number>
+       </property>
+      </widget>
+     </item>
+     <item row="14" column="0">
+      <widget class="QLabel" name="labelIndirectBufferBlock">
+       <property name="text">
+        <string>Indirect Block</string>
+       </property>
+      </widget>
+     </item>
+     <item row="15" column="0">
+      <widget class="QLabel" name="labelAccelerationStructure">
+       <property name="text">
+        <string>Accel. Structure</string>
+       </property>
+      </widget>
+     </item>
+     <item row="15" column="1">
+      <widget class="ReferenceComboBox" name="accelerationStructure"/>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>DataComboBox</class>
+   <extends>QComboBox</extends>
+   <header>widgets//DataComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ReferenceComboBox</class>
+   <extends>QComboBox</extends>
+   <header>widgets//ReferenceComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ColorPicker</class>
+   <extends>QCheckBox</extends>
+   <header>widgets//ColorPicker.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ExpressionLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>widgets//ExpressionLineEdit.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

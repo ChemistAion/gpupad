@@ -3,6 +3,7 @@
 #include "Evaluation.h"
 #include "ItemEnums.h"
 #include "SourceType.h"
+#include <QVariantMap>
 #include <QList>
 #include <QOpenGLTexture>
 #include <QVariant>
@@ -22,6 +23,7 @@ struct Item
     Item *parent{};
     QList<Item *> items;
     QString name;
+    QVariantMap custom;
 };
 
 struct FileItem : Item
@@ -39,19 +41,19 @@ struct Root : ScopeItem
 
 struct Session : ScopeItem
 {
-    QString renderer{ "OpenGL" };
-    QString shaderCompiler;
+    using Renderer = ItemEnums::Renderer;
+    using ShaderLanguage = ItemEnums::ShaderLanguage;
+    using ShaderCompiler = ItemEnums2::ShaderCompiler;
+    using ShaderCompilerSetting = ItemEnums2::ShaderCompilerSetting;
+
+    Renderer renderer{ Renderer::OpenGL };
+    ShaderLanguage shaderLanguage{ ShaderLanguage::GLSL };
+    ShaderCompiler shaderCompiler{ ShaderCompiler::Driver };
+    QVariantMap shaderCompilerSettings;
     QString shaderPreamble;
     QString shaderIncludePaths;
     bool flipViewport{};
     bool reverseCulling{ true };
-
-    // glslang compiler options
-    bool autoMapBindings{ true };
-    bool autoMapLocations{ true };
-    bool autoSampledTextures{ true };
-    bool vulkanRulesRelaxed{ true };
-    int spirvVersion{};
 };
 
 struct Group : ScopeItem
@@ -102,10 +104,8 @@ struct Program : Item
 struct Shader : FileItem
 {
     using ShaderType = ItemEnums::ShaderType;
-    using Language = ItemEnums::ShaderLanguage;
 
     ShaderType shaderType{ ShaderType::Vertex };
-    Language language{ Language::GLSL };
     QString entryPoint;
     QString preamble;
     QString includePaths;
@@ -304,6 +304,7 @@ struct CallKind
 };
 
 Item::Type getItemTypeByName(const QString &name, bool *ok = nullptr);
+int getDataTypeSize(Field::DataType dataType);
 int getFieldSize(const Field &field);
 int getFieldRowOffset(const Field &field);
 int getBlockStride(const Block &block);
@@ -313,9 +314,31 @@ bool callTypeSupportsShaderType(Call::CallType callType,
     Shader::ShaderType shaderType);
 bool shouldExecute(Call::ExecuteOn executeOn, EvaluationType evaluationType);
 
-SourceType getSourceType(Shader::ShaderType type, Shader::Language language);
+SourceType getSourceType(Session::ShaderLanguage language,
+    Shader::ShaderType type);
+SourceType getSourceType(const Shader &shader);
 Shader::ShaderType getShaderType(SourceType sourceType);
-Shader::Language getShaderLanguage(SourceType sourceType);
+Session::ShaderLanguage getShaderLanguage(SourceType sourceType);
+Session::ShaderLanguage getShaderLanguage(const Shader &shader);
+bool shaderCompilerHasSetting(const Session& session, Session::ShaderCompilerSetting setting);
+bool shaderCompilerHasSetting(Session::ShaderCompiler compiler,
+    Session::Renderer renderer, Session::ShaderCompilerSetting setting);
+QVariant getShaderCompilerSetting(const Session &session,
+    Session::ShaderCompilerSetting setting);
+void setShaderCompilerSetting(Session &session,
+    Session::ShaderCompilerSetting setting, QVariant value);
+
+inline bool getShaderCompilerBool(const Session &session,
+    Session::ShaderCompilerSetting setting)
+{
+    return getShaderCompilerSetting(session, setting).toBool();
+}
+
+inline int getShaderCompilerInt(const Session &session,
+    Session::ShaderCompilerSetting setting)
+{
+    return getShaderCompilerSetting(session, setting).toInt();
+}
 
 template <typename T>
 Item::Type getItemType();

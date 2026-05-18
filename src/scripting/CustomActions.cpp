@@ -3,15 +3,14 @@
 #include "FileCache.h"
 #include "Singletons.h"
 #include "ScriptEngine.h"
+#include "editors/EditorManager.h"
 #include "objects/AppScriptObject.h"
-#include "objects/SessionScriptObject.h"
 #include <QDirIterator>
-#include <QFileInfo>
+#include <QApplication>
 
 namespace {
     QString extractManifest(const QString &string)
     {
-        // TODO: improve
         const auto begin = string.indexOf("manifest");
         if (begin < 0)
             return {};
@@ -63,6 +62,11 @@ CustomAction::CustomAction(const QString &filePath) : mFilePath(filePath)
     }
 }
 
+void CustomAction::openInEditor()
+{
+    Singletons::editorManager().openEditor(mFilePath);
+}
+
 bool CustomAction::updateManifest(ScriptEngine &scriptEngine)
 {
     auto manifest = parseManifest(mFilePath, scriptEngine);
@@ -88,16 +92,12 @@ MessagePtrSet CustomAction::apply(const QModelIndexList &selection)
 {
     mScriptEngine.reset();
 
-    const auto basePath = QFileInfo(mFilePath).absolutePath();
-    mScriptEngine = ScriptEngine::make(basePath);
-    mScriptEngine->appScriptObject().sessionScriptObject().setSelection(selection);
+    mScriptEngine = ScriptEngine::make(objectName(), mFilePath);
+    mScriptEngine->appScriptObject().setSelection(selection);
 
     applyInEngine(*mScriptEngine);
 
-    // TODO: run in cancelable background thread
-    mScriptEngine->appScriptObject()
-        .sessionScriptObject()
-        .endBackgroundUpdate();
+    mScriptEngine->appScriptObject().endBackgroundUpdate();
 
     return mScriptEngine->resetMessages();
 }
@@ -121,6 +121,10 @@ void CustomActions::actionTriggered()
     auto &action = static_cast<CustomAction &>(
         *qobject_cast<QAction *>(QObject::sender()));
 
+    const auto modifiers = QApplication::queryKeyboardModifiers();
+    if (modifiers & Qt::ControlModifier)
+        return action.openInEditor();
+
     mMessages = action.apply(mSelection);
 }
 
@@ -133,8 +137,8 @@ void CustomActions::updateActions()
     mActions.clear();
 
     for (const auto &dir : getApplicationDirectories(ActionsDir)) {
-        auto scriptEngine = ScriptEngine::make(dir.path());
-        scriptEngine->appScriptObject().sessionScriptObject().setSelection(mSelection);
+        auto scriptEngine = ScriptEngine::make(dir);
+        scriptEngine->appScriptObject().setSelection(mSelection);
 
         auto it = QDirIterator(dir.path(), QStringList() << "*.js", QDir::Files,
             QDirIterator::Subdirectories);
@@ -147,8 +151,8 @@ void CustomActions::updateActions()
             connect(action.get(), &QAction::triggered, this,
                 &CustomActions::actionTriggered);
 
-            // keep only last action with identical name
-            mActions[action->text()] = std::move(action);
+            // keep only first action with identical id
+            mActions.emplace(action->objectName(), std::move(action));
         }
         mMessages += scriptEngine->resetMessages();
     }
@@ -170,6 +174,17 @@ QList<CustomActionPtr> CustomActions::getApplicableActions()
         if (action->isEnabled())
             actions += action;
     return actions;
+}
+
+bool CustomActions::applyAction(const QString &id)
+{
+    Q_ASSERT(onMainThread());
+    auto action = getActionById(id);
+    if (!action)
+        return false;
+
+    mMessages += action->apply(mSelection);
+    return true;
 }
 
 CustomActionPtr CustomActions::getActionById(const QString &id)

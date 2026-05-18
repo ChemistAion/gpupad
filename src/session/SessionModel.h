@@ -1,7 +1,6 @@
 #pragma once
 
 #include "SessionModelCore.h"
-#include <QFont>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -41,7 +40,8 @@ public:
     void setActiveItemColor(QColor color);
 
     void clear();
-    QJsonArray getJson(const QModelIndexList &indexes) const;
+    QJsonArray getJson(const QModelIndexList &indexes,
+        bool serializingScriptItem = false) const;
     void dropJson(const QJsonArray &json, int row, const QModelIndex &parent,
         bool updateExisting);
     bool save(const QString &fileName);
@@ -84,12 +84,22 @@ public:
     }
 
     template <typename F> // F(const FileItem&)
-    void forEachFileItem(const F &function)
+    void forEachFileItem(const F &function) const
     {
         forEachItem([&](const Item &item) {
             if (auto fileItem = castItem<FileItem>(item))
                 function(*fileItem);
         });
+    }
+
+    const Item *findFileItem(const QString &fileName) const
+    {
+        auto item = std::add_pointer_t<const Item>{};
+        forEachFileItem([&](const FileItem &fileItem) {
+            if (fileItem.fileName == fileName)
+                item = &fileItem;
+        });
+        return item;
     }
 
 Q_SIGNALS:
@@ -102,7 +112,7 @@ private:
     QJsonArray parseDraggedJson(QModelIndex target,
         const QMimeData *data) const;
     void serialize(QJsonObject &object, const Item &item,
-        bool relativeFilePaths) const;
+        bool relativeFilePaths, bool serializingScriptItem = false) const;
     void deserialize(const QJsonObject &object, const QModelIndex &parent,
         int row, bool updateExisting);
 
@@ -146,3 +156,6 @@ private:
     mutable QJsonArray mDraggedJson;
     mutable QMap<ItemId, QString> mDraggedUntitledFileNames;
 };
+
+bool rendererHasSetting(Session::Renderer renderer,
+    SessionModel::ColumnType column);

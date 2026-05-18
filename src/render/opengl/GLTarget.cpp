@@ -25,15 +25,14 @@ GLTarget::GLTarget(const Target &target, GLRenderSession &renderSession)
     }
 }
 
-void GLTarget::setAttachment(int index, GLTexture *texture)
+void GLTarget::setTexture(int index, GLTexture *texture)
 {
     if (!texture)
         return;
 
     if (const auto first = mAttachments.first().texture;
         first && texture->samples() != first->samples()) {
-        mMessages +=
-            MessageList::insert(mItemId, MessageType::SampleCountMismatch);
+        mMessages.insert(mItemId, MessageType::SampleCountMismatch);
         return;
     }
     mAttachments[index].texture = texture;
@@ -110,32 +109,29 @@ bool GLTarget::create()
 
             if (kind.array && attachment.layer >= 0) {
                 gl.glFramebufferTextureLayer(GL_FRAMEBUFFER,
-                    attachment.attachmentPoint, texture->getReadOnlyTextureId(),
+                    attachment.attachmentPoint, texture->getReadWriteTextureId(),
                     level, attachment.layer);
             } else {
                 gl.glFramebufferTexture(GL_FRAMEBUFFER,
-                    attachment.attachmentPoint, texture->getReadOnlyTextureId(),
+                    attachment.attachmentPoint, texture->getReadWriteTextureId(),
                     level);
             }
         }
 
-#if GL_VERSION_4_3
-    auto gl43 = gl.v4_3;
-    if (gl43 && mAttachments.empty()) {
-        gl43->glFramebufferParameteri(GL_FRAMEBUFFER,
-            GL_FRAMEBUFFER_DEFAULT_WIDTH, mDefaultWidth);
-        gl43->glFramebufferParameteri(GL_FRAMEBUFFER,
+    if (mAttachments.empty()) {
+        gl.glFramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_WIDTH,
+            mDefaultWidth);
+        gl.glFramebufferParameteri(GL_FRAMEBUFFER,
             GL_FRAMEBUFFER_DEFAULT_HEIGHT, mDefaultHeight);
-        gl43->glFramebufferParameteri(GL_FRAMEBUFFER,
+        gl.glFramebufferParameteri(GL_FRAMEBUFFER,
             GL_FRAMEBUFFER_DEFAULT_LAYERS, mDefaultLayers);
-        gl43->glFramebufferParameteri(GL_FRAMEBUFFER,
+        gl.glFramebufferParameteri(GL_FRAMEBUFFER,
             GL_FRAMEBUFFER_DEFAULT_SAMPLES, mDefaultSamples);
     }
-#endif
 
     const auto status = gl.glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        mMessages += MessageList::insert(mItemId,
+        mMessages.insert(mItemId,
             MessageType::CreatingFramebufferFailed,
             (status == GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT
                     ? "(incomplete attachment)"
@@ -207,12 +203,11 @@ void GLTarget::applyAttachmentStates(const GLAttachment &a)
             gl.glBlendEquationSeparate(a.blendColorEq, a.blendAlphaEq);
             gl.glBlendFuncSeparate(a.blendColorSource, a.blendColorDest,
                 a.blendAlphaSource, a.blendAlphaDest);
-        } else if (auto gl40 = check(gl.v4_0, mItemId, mMessages)) {
-            gl40->glEnablei(GL_BLEND, index);
-            gl40->glBlendEquationSeparatei(index, a.blendColorEq,
-                a.blendAlphaEq);
-            gl40->glBlendFuncSeparatei(index, a.blendColorSource,
-                a.blendColorDest, a.blendAlphaSource, a.blendAlphaDest);
+        } else {
+            gl.glEnablei(GL_BLEND, index);
+            gl.glBlendEquationSeparatei(index, a.blendColorEq, a.blendAlphaEq);
+            gl.glBlendFuncSeparatei(index, a.blendColorSource, a.blendColorDest,
+                a.blendAlphaSource, a.blendAlphaDest);
         }
 
         auto isSet = [](auto v, auto bit) { return (v & (1 << bit)) != 0; };

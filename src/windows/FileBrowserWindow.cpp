@@ -30,12 +30,16 @@ FileBrowserWindow::FileBrowserWindow(QWidget *parent)
     mBrowseButton->setIcon(
         QIcon(QIcon::fromTheme(QString::fromUtf8("document-open"))));
     mBrowseButton->setAutoRaise(true);
+    mBrowseButton->setToolTip(tr("Browse"));
 
     mShowInFileManagerButton->setIcon(
-        QIcon(QIcon::fromTheme(QString::fromUtf8("dialog-information"))));
+        QIcon(QIcon::fromTheme(QString::fromUtf8("document-properties"))));
     mShowInFileManagerButton->setAutoRaise(true);
+    mShowInFileManagerButton->setToolTip(tr("Open Folder"));
 
     for (const auto &dir : getApplicationDirectories(ActionsDir))
+        updateRecentDirectories(dir.path());
+    for (const auto &dir : getApplicationDirectories(LibrariesDir))
         updateRecentDirectories(dir.path());
 
     mRootDirectory->setMinimumWidth(100);
@@ -124,7 +128,9 @@ void FileBrowserWindow::currentDirectoryChanged(const QDir &dir)
 
 void FileBrowserWindow::itemActivated(const QModelIndex &index)
 {
-    Q_EMIT fileActivated(toNativeCanonicalFilePath(mModel->filePath(index)));
+    const auto fileName = mModel->filePath(index);
+    if (QFileInfo(fileName).isFile())
+        Q_EMIT fileActivated(toNativeCanonicalFilePath(fileName));
 }
 
 void FileBrowserWindow::browseDirectory()

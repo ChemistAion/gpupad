@@ -3,11 +3,12 @@
 #include "FileDialog.h"
 #include "SessionModel.h"
 #include "Singletons.h"
-#include "PropertiesEditor.h"
+#include "properties/PropertiesEditor.h"
 #include <QApplication>
 #include <QClipboard>
 #include <QMenu>
 #include <QMimeData>
+#include <QDropEvent>
 
 SessionEditor::SessionEditor(QWidget *parent)
     : QTreeView(parent)
@@ -112,16 +113,15 @@ void SessionEditor::updateItemActions()
         Item::Type type;
         QAction *action;
     };
-    for (const auto [type, action] :
-        {
-            TypeAction{ Item::Type::Block, mAddBlockAction },
-            TypeAction{ Item::Type::Field, mAddFieldAction },
-            TypeAction{ Item::Type::Shader, mAddShaderAction },
-            TypeAction{ Item::Type::Attribute, mAddAttributeAction },
-            TypeAction{ Item::Type::Attachment, mAddAttachmentAction },
-            TypeAction{ Item::Type::Instance, mAddInstanceAction },
-            TypeAction{ Item::Type::Geometry, mAddGeometryAction },
-        })
+    for (const auto [type, action] : {
+             TypeAction{ Item::Type::Block, mAddBlockAction },
+             TypeAction{ Item::Type::Field, mAddFieldAction },
+             TypeAction{ Item::Type::Shader, mAddShaderAction },
+             TypeAction{ Item::Type::Attribute, mAddAttributeAction },
+             TypeAction{ Item::Type::Attachment, mAddAttachmentAction },
+             TypeAction{ Item::Type::Instance, mAddInstanceAction },
+             TypeAction{ Item::Type::Geometry, mAddGeometryAction },
+         })
         action->setVisible(mModel.canContainType(index, type)
             || mModel.canContainType(index.parent(), type));
 }
@@ -211,10 +211,12 @@ void SessionEditor::selectionChanged(const QItemSelection &selected,
         if (index.parent() != parent)
             invalid.select(index, index);
 
-    if (!invalid.empty())
+    if (!invalid.empty()) {
         selectionModel()->select(invalid, QItemSelectionModel::Deselect);
-    else
+        QTreeView::selectionChanged(selectionModel()->selection(), deselected);
+    } else {
         QTreeView::selectionChanged(selected, deselected);
+    }
 }
 
 void SessionEditor::focusInEvent(QFocusEvent *event)
@@ -227,6 +229,14 @@ void SessionEditor::focusOutEvent(QFocusEvent *event)
 {
     QTreeView::focusOutEvent(event);
     Q_EMIT focusChanged(false);
+}
+
+void SessionEditor::dropEvent(QDropEvent *event)
+{
+    QTreeView::dropEvent(event);
+
+    // ensure Session stays expanded
+    setExpanded(mModel.sessionItemIndex(), true);
 }
 
 bool SessionEditor::isModified() const

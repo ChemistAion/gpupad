@@ -56,40 +56,41 @@ bool VKProgram::operator==(const VKProgram &rhs) const
         && !shaderSessionSettingsDiffer(mSession, rhs.mSession));
 }
 
-bool VKProgram::link(KDGpu::Device &device)
+bool VKProgram::link(VKContext &context)
 {
     if (mFailed)
         return false;
-    if (!mInterface.empty())
+    if (!mReflection.empty())
         return true;
 
     if (mCompileShadersSeparately) {
         for (auto &shader : mShaders) {
-            auto inputs = std::vector<Spirv::Input>();
-            inputs.push_back(shader.getSpirvCompilerInput(mPrintf));
+            auto inputs = std::vector<ShaderCompiler::Input>();
+            inputs.push_back(shader.getShaderCompilerInput(mPrintf));
 
-            auto stages =
-                Spirv::compile(mSession, inputs, mItemId, mLinkMessages);
+            auto stages = ShaderCompiler::compileSpirv(mSession, inputs,
+                mItemId, mLinkMessages);
             if (stages.empty()) {
                 mFailed = true;
                 return false;
             }
-            shader.create(device, stages[shader.type()]);
-            mInterface[shader.getShaderStage().stage] = shader.interface();
+            shader.create(context.device, stages[shader.type()]);
+            mReflection[shader.getShaderStage().stage] = shader.reflection();
         }
     } else {
-        auto inputs = std::vector<Spirv::Input>();
+        auto inputs = std::vector<ShaderCompiler::Input>();
         for (auto &shader : mShaders)
-            inputs.push_back(shader.getSpirvCompilerInput(mPrintf));
+            inputs.push_back(shader.getShaderCompilerInput(mPrintf));
 
-        auto stages = Spirv::compile(mSession, inputs, mItemId, mLinkMessages);
+        auto stages = ShaderCompiler::compileSpirv(mSession, inputs, mItemId,
+            mLinkMessages);
         if (stages.empty()) {
             mFailed = true;
             return false;
         }
         for (auto &shader : mShaders) {
-            shader.create(device, stages[shader.type()]);
-            mInterface[shader.getShaderStage().stage] = shader.interface();
+            shader.create(context.device, stages[shader.type()]);
+            mReflection[shader.getShaderStage().stage] = shader.reflection();
         }
     }
     return true;

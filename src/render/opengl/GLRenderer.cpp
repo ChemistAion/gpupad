@@ -22,23 +22,26 @@ QString getFirstGLError()
 class GLRenderer::Worker final : public QObject
 {
     Q_OBJECT
-
 public:
+    explicit Worker(GLRenderer *renderer) : mRenderer(*renderer) { }
+
     GLContext context;
     QOffscreenSurface surface;
 
     void handleConfigureTask(RenderTask *renderTask)
     {
-        if (!std::exchange(mInitialized, true))
-            initialize();
-
-        renderTask->configure();
+        if (!mInitialized)
+            if (initialize())
+                mInitialized = true;
+        if (mInitialized)
+            renderTask->configure();
         Q_EMIT taskConfigured();
     }
 
     void handleRenderTask(RenderTask *renderTask)
     {
-        renderTask->render();
+        if (mInitialized)
+            renderTask->render();
         Q_EMIT taskRendered();
     }
 
@@ -52,9 +55,10 @@ public:
 public Q_SLOTS:
     void stop()
     {
-        mDebugLogger.reset();
-        context.doneCurrent();
-
+        if (mInitialized) {
+            mDebugLogger.reset();
+            context.doneCurrent();
+        }
         auto guiThread = QApplication::instance()->thread();
         context.moveToThread(guiThread);
         surface.moveToThread(guiThread);
@@ -66,43 +70,54 @@ Q_SIGNALS:
     void taskRendered();
 
 private:
-    void initialize()
+    bool initialize()
     {
-        context.makeCurrent(&surface);
-        context.initializeOpenGLFunctions();
+        if (!context.makeCurrent(&surface)
+            || !context.initializeOpenGLFunctions()) {
+            mMessages.insert(0, MessageType::OpenGLVersionNotAvailable, "4.5");
+            mRenderer.setFailed();
+            return false;
+        }
 
         mDebugLogger = std::make_unique<QOpenGLDebugLogger>();
+
         if (mDebugLogger->initialize()) {
             mDebugLogger->disableMessages(QOpenGLDebugMessage::AnySource,
                 QOpenGLDebugMessage::AnyType,
-                QOpenGLDebugMessage::NotificationSeverity);
+                QOpenGLDebugMessage::NotificationSeverity
+                    | QOpenGLDebugMessage::LowSeverity
+                    | QOpenGLDebugMessage::MediumSeverity);
+
             connect(mDebugLogger.get(), &QOpenGLDebugLogger::messageLogged,
                 this, &Worker::handleDebugMessage);
             mDebugLogger->startLogging(QOpenGLDebugLogger::SynchronousLogging);
         }
+        return true;
     }
 
     void handleDebugMessage(const QOpenGLDebugMessage &message)
     {
-        auto lock = QMutexLocker(&gFirstGLErrorMutex);
-        if (message.severity() == QOpenGLDebugMessage::HighSeverity) {
-            if (gFirstGLError.isEmpty())
-                gFirstGLError = message.message();
-        } else {
+        const auto lock = QMutexLocker(&gFirstGLErrorMutex);
+        Q_ASSERT(message.severity() == QOpenGLDebugMessage::HighSeverity);
+
+        if (gFirstGLError.isEmpty())
+            gFirstGLError = message.message();
+
 #if !defined(NDEBUG)
-            qDebug() << message.message();
+        qDebug() << message.message();
 #endif
-        }
     }
 
+    GLRenderer &mRenderer;
     bool mInitialized{};
     std::unique_ptr<QOpenGLDebugLogger> mDebugLogger;
+    MessagePtrSet mMessages;
 };
 
 GLRenderer::GLRenderer(QObject *parent)
     : QObject(parent)
-    , Renderer(RenderAPI::OpenGL)
-    , mWorker(std::make_unique<Worker>())
+    , Renderer(Renderer::Type::OpenGL)
+    , mWorker(std::make_unique<Worker>(this))
 {
     mWorker->context.setShareContext(QOpenGLContext::globalShareContext());
     mWorker->context.create();
@@ -132,7 +147,9 @@ GLRenderer::~GLRenderer()
 {
     mPendingTasks.clear();
 
-    QMetaObject::invokeMethod(mWorker.get(), "stop", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(
+        mWorker.get(), [worker = mWorker.get()]() { worker->stop(); },
+        Qt::QueuedConnection);
     mThread.wait();
 
     mWorker.reset();
@@ -146,11 +163,16 @@ void GLRenderer::render(RenderTask *task)
     renderNextTask();
 }
 
+void GLRenderer::finish()
+{
+    while (mCurrentTask)
+        qApp->processEvents(QEventLoop::WaitForMoreEvents);
+}
+
 void GLRenderer::release(RenderTask *task)
 {
     mPendingTasks.removeAll(task);
-    while (mCurrentTask == task)
-        qApp->processEvents(QEventLoop::WaitForMoreEvents);
+    finish();
 
     QSemaphore done(1);
     done.acquire(1);

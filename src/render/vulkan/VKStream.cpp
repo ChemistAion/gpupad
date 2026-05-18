@@ -6,17 +6,15 @@ VKStream::VKStream(const Stream &stream) : mItemId(stream.id)
     mUsedItems += stream.id;
 
     auto attributeIndex = 0;
-    for (const auto *item : stream.items) {
+    for (const auto *item : stream.items)
         if (auto attribute = castItem<Attribute>(item)) {
             mUsedItems += item->id;
-            mAttributes[attributeIndex] = VKAttribute{
+            mAttributes[attributeIndex++] = VKAttribute{
                 attribute->name,
                 attribute->normalize,
                 attribute->divisor,
             };
         }
-        ++attributeIndex;
-    }
 }
 
 void VKStream::setAttribute(int attributeIndex, const Field &field,
@@ -34,13 +32,15 @@ void VKStream::setAttribute(int attributeIndex, const Field &field,
     attribute.stride = getBlockStride(block);
     attribute.offset = blockOffset + getFieldRowOffset(field);
 
-    const auto rowCount = scriptEngine.evaluateValue(block.rowCount, block.id);
-    if (mMaxElementCount < 0 || rowCount < mMaxElementCount)
-        mMaxElementCount = rowCount;
+    if (attribute.divisor == 0) {
+        const auto rowCount =
+            scriptEngine.evaluateValue(block.rowCount, block.id);
+        if (mMaxElementCount < 0 || rowCount < mMaxElementCount)
+            mMaxElementCount = rowCount;
+    }
 
     if (!validateAttribute(attribute)) {
-        mMessages +=
-            MessageList::insert(field.id, MessageType::InvalidAttribute);
+        mMessages.insert(field.id, MessageType::InvalidAttribute);
         mAttributes.remove(attributeIndex);
     }
     invalidateVertexOptions();
@@ -71,7 +71,7 @@ void VKStream::updateVertexOptions()
 
     for (const auto &attribute : mAttributes)
         if (!validateAttribute(attribute)) {
-            mMessages += MessageList::insert(mItemId,
+            mMessages.insert(mItemId,
                 MessageType::AttributeNotSet, attribute.name);
             return;
         }

@@ -5,6 +5,7 @@
 #include <QOpenGLFunctions_3_3_Core>
 #include <QScopeGuard>
 #include <QtEndian>
+#include <QFileInfo>
 #include <cstring>
 #include <limits>
 
@@ -315,6 +316,16 @@ namespace {
         return stbir_resize(source, sourceWidth, sourceHeight, sourceStride,
             dest, destWidth, destHeight, destStride, pixelLayout, dataType,
             edgeMode, filter);
+    }
+    
+    QImage flipImage(QImage &&image)
+    {
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 9, 0))
+        image = image.flipped(Qt::Vertical);
+#else
+        image = std::move(image).mirrored();
+#endif
+        return image;
     }
 } // namespace
 
@@ -746,7 +757,7 @@ bool TextureData::loadOpenImageIO(const QString &fileName, bool flipVertically)
     return false;
 #else // OpenImageIO_FOUND
     using namespace OIIO;
-    auto input = ImageInput::open(fileName.toStdWString());
+    auto input = ImageInput::open(qUtf8Printable(fileName));
     if (!input) {
         OIIO::geterror();
         return false;
@@ -830,7 +841,7 @@ bool TextureData::loadQImage(QImage image, bool flipVertically)
         getNextNativeImageFormat(image.format()));
 
     if (flipVertically)
-        image = std::move(image).mirrored();
+        image = flipImage(std::move(image));
 
     if (!create(QOpenGLTexture::Target2D, getTextureFormat(image.format()),
             image.width(), image.height(), 1, 1))
@@ -951,13 +962,14 @@ bool TextureData::saveOpenImageIO(const QString &fileName,
     if (typeDesc == TypeDesc::NONE)
         return false;
 
-    auto output = ImageOutput::create(fileName.toStdWString());
+    auto output = ImageOutput::create(qUtf8Printable(fileName));
+    const auto guard = qScopeGuard([]() { OIIO::geterror(); });
     if (!output)
         return false;
 
     const auto channelCount = getTextureComponentCount(format());
     const auto spec = ImageSpec(width(), height(), channelCount, typeDesc);
-    if (!output->open(fileName.toStdWString(), spec))
+    if (!output->open(qUtf8Printable(fileName), spec))
         return false;
     if (!output->write_image(typeDesc, getData(0, 0, 0)))
         return false;
@@ -972,9 +984,10 @@ bool TextureData::saveQImage(const QString &fileName, bool flipVertically) const
         return false;
 
     if (flipVertically)
-        image = std::move(image).mirrored();
+        image = flipImage(std::move(image));
 
-    return image.save(fileName);
+    const auto hasExtension = !QFileInfo(fileName).suffix().isEmpty();
+    return image.save(fileName, hasExtension ? nullptr : "PNG");
 }
 
 bool TextureData::save(const QString &fileName, bool flipVertically) const
@@ -1065,7 +1078,7 @@ QOpenGLTexture::TextureFormat TextureData::format() const
 {
     return (isNull() ? QOpenGLTexture::TextureFormat::NoFormat
                      : static_cast<QOpenGLTexture::TextureFormat>(
-                         mKtxTexture->glInternalformat));
+                           mKtxTexture->glInternalformat));
 }
 
 QOpenGLTexture::PixelFormat TextureData::pixelFormat() const
@@ -1106,7 +1119,7 @@ int TextureData::getLevelDepth(int level) const
 int TextureData::getLevelStride(int level) const
 {
     if (auto height = getLevelHeight(level))
-        return getLevelSize(level) / height;
+        return getImageSize(level) / height;
     return 0;
 }
 
@@ -1179,18 +1192,27 @@ const uchar *TextureData::getData(int level, int layer, int faceSlice) const
     return nullptr;
 }
 
+size_t TextureData::getOffset(int level, int layer, int faceSlice) const
+{
+    return std::distance(getData(), getData(level, layer, faceSlice));
+}
+
 int TextureData::getImageSize(int level) const
 {
     if (isNull())
         return 0;
     return static_cast<int>(ktxTexture_GetImageSize(
-               ktxTexture(mKtxTexture.get()), static_cast<ktx_uint32_t>(level)))
-        * getLevelDepth(level);
+        ktxTexture(mKtxTexture.get()), static_cast<ktx_uint32_t>(level)));
+}
+
+int TextureData::getSlicesSize(int level) const
+{
+    return getImageSize(level) * getLevelDepth(level);
 }
 
 int TextureData::getLevelSize(int level) const
 {
-    return getImageSize(level) * layers() * faces();
+    return getSlicesSize(level) * layers() * faces();
 }
 
 void TextureData::clear()

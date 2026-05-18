@@ -1,15 +1,14 @@
 #include "VKRenderer.h"
 #include "MessageList.h"
 #include "TextureData.h"
+#include "render/AdapterIdentity.h"
 #include "render/RenderTask.h"
 #include <QApplication>
 #include <QMutex>
 #include <QSemaphore>
-#include <QOpenGLContext>
-#include <QOffscreenSurface>
- 
+
 // TODO: added because of multiple definitions of fmt::v11::detail::assert_fail
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(FMT_ASSERT)
 #  define FMT_ASSERT
 #endif
 
@@ -24,53 +23,8 @@
 #  include <vulkan/vulkan_win32.h>
 #endif
 
-using UUID = std::array<uint8_t, 16>;
-
 namespace {
-    struct AdapterIdentity
-    {
-        UUID deviceUUIDs[4];
-        UUID driverUUID;
-    };
-
     AdapterIdentity gAdapterIdentity;
-
-    AdapterIdentity getOpenGLAdapterIdentity()
-    {
-        auto glContext = QOpenGLContext();
-        glContext.setShareContext(QOpenGLContext::globalShareContext());
-        auto surface = QOffscreenSurface();
-        surface.setFormat(glContext.format());
-        surface.create();
-        glContext.create();
-        if (!glContext.makeCurrent(&surface))
-            return {};
-        const auto guard = QScopeGuard([&]() { glContext.doneCurrent(); });
-
-        if (!glContext.hasExtension("GL_EXT_memory_object"))
-            return {};
-        const auto glGetUnsignedBytevEXT =
-            reinterpret_cast<PFNGLGETUNSIGNEDBYTEVEXTPROC>(
-                glContext.getProcAddress("glGetUnsignedBytevEXT"));
-        if (!glGetUnsignedBytevEXT)
-            return {};
-
-        const auto glGetUnsignedBytei_vEXT =
-            reinterpret_cast<PFNGLGETUNSIGNEDBYTEI_VEXTPROC>(
-                glContext.getProcAddress("glGetUnsignedBytei_vEXT"));
-        if (!glGetUnsignedBytei_vEXT)
-            return {};
-
-        auto identity = AdapterIdentity();
-        static_assert(GL_UUID_SIZE_EXT == sizeof(UUID));
-        auto numDeviceUuids = GLint{};
-        glGetIntegerv(GL_NUM_DEVICE_UUIDS_EXT, &numDeviceUuids);
-        for (auto i = 0; i < std::min(numDeviceUuids, 4); ++i)
-            glGetUnsignedBytei_vEXT(GL_DEVICE_UUID_EXT, i,
-                identity.deviceUUIDs[i].data());
-        glGetUnsignedBytevEXT(GL_DRIVER_UUID_EXT, identity.driverUUID.data());
-        return identity;
-    }
 } // namespace
 
 class VKRenderer::Worker final : public QObject
@@ -89,8 +43,7 @@ public:
             if (mDevice.isValid())
                 renderTask->configure();
         } catch (const std::exception &ex) {
-            mMessages +=
-                MessageList::insert(0, MessageType::RenderingFailed, ex.what());
+            mMessages.insert(0, MessageType::RenderingFailed, ex.what());
             shutdown();
         }
         Q_EMIT taskConfigured();
@@ -102,8 +55,7 @@ public:
             if (mDevice.isValid())
                 renderTask->render();
         } catch (const std::exception &ex) {
-            mMessages +=
-                MessageList::insert(0, MessageType::RenderingFailed, ex.what());
+            mMessages.insert(0, MessageType::RenderingFailed, ex.what());
         }
         Q_EMIT taskRendered();
     }
@@ -131,8 +83,7 @@ private:
     void initialize()
     {
         const auto error = [&](const QString &message) {
-            mMessages += MessageList::insert(0, MessageType::VulkanNotAvailable,
-                message);
+            mMessages.insert(0, MessageType::VulkanNotAvailable, message);
             shutdown();
         };
 
@@ -246,6 +197,7 @@ private:
         mRenderer.mDevice = nullptr;
         mRenderer.mQueue = nullptr;
         mRenderer.mKtxDeviceInfo = nullptr;
+        mRenderer.setFailed();
     }
 
     VKRenderer &mRenderer;
@@ -262,7 +214,7 @@ private:
 
 VKRenderer::VKRenderer(QObject *parent)
     : QObject(parent)
-    , Renderer(RenderAPI::Vulkan)
+    , Renderer(Renderer::Type::Vulkan)
     , mWorker(std::make_unique<Worker>(this))
 {
     gAdapterIdentity = getOpenGLAdapterIdentity();
@@ -287,7 +239,9 @@ VKRenderer::~VKRenderer()
 {
     mPendingTasks.clear();
 
-    QMetaObject::invokeMethod(mWorker.get(), "stop", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(
+        mWorker.get(), [worker = mWorker.get()]() { worker->stop(); },
+        Qt::QueuedConnection);
     mThread.wait();
 
     mWorker.reset();
@@ -301,11 +255,16 @@ void VKRenderer::render(RenderTask *task)
     renderNextTask();
 }
 
+void VKRenderer::finish()
+{
+    while (mCurrentTask)
+        qApp->processEvents(QEventLoop::WaitForMoreEvents);
+}
+
 void VKRenderer::release(RenderTask *task)
 {
     mPendingTasks.removeAll(task);
-    while (mCurrentTask == task)
-        qApp->processEvents(QEventLoop::WaitForMoreEvents);
+    finish();
 
     QSemaphore done(1);
     done.acquire(1);

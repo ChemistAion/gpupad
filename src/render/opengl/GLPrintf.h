@@ -1,15 +1,15 @@
 #pragma once
 
-#include "GLItem.h"
-#include "render/ShaderPrintf.h"
+#include "GLBuffer.h"
+#include "render/PrintfBase.h"
 
-class GLPrintf : public ShaderPrintf
+class GLPrintf : public PrintfBase
 {
 public:
-    const GLObject &bufferObject() const { return mBufferObject; }
-    void clear();
-    MessagePtrSet formatMessages(ItemId callItemId);
+    GLBuffer &getInitializedBuffer(GLContext &context);
+    void beginDownload(GLContext &context);
+    MessagePtrSet finishDownload(ItemId callItemId);
 
 private:
-    GLObject mBufferObject;
+    std::optional<GLBuffer> mBuffer;
 };

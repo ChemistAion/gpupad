@@ -3,33 +3,36 @@
 #include "FileCache.h"
 #include "Singletons.h"
 #include "SynchronizeLogic.h"
-#include "editors/EditorManager.h"
-#include "editors/binary/BinaryEditor.h"
-#include "editors/texture/TextureEditor.h"
-#include "opengl/GLRenderSession.h"
 #include "scripting/ScriptEngine.h"
 #include "scripting/ScriptSession.h"
 #include "session/SessionModel.h"
+#include "opengl/GLRenderSession.h"
 #include "vulkan/VKRenderSession.h"
 
+#if defined(_WIN32)
+#  include "direct3d/D3DRenderSession.h"
+#endif
+
 std::unique_ptr<RenderSessionBase> RenderSessionBase::create(
-    RendererPtr renderer, const QString &basePath)
+    RendererPtr renderer)
 {
     auto session = std::unique_ptr<RenderSessionBase>();
-    switch (renderer->api()) {
-    case RenderAPI::OpenGL:
-        return std::make_unique<GLRenderSession>(renderer, basePath);
-    case RenderAPI::Vulkan:
-        return std::make_unique<VKRenderSession>(renderer, basePath);
+    switch (renderer->type()) {
+    case Renderer::Type::OpenGL:
+        return std::make_unique<GLRenderSession>(renderer);
+    case Renderer::Type::Vulkan:
+        return std::make_unique<VKRenderSession>(renderer);
+    case Renderer::Type::Direct3D:
+#if defined(_WIN32)
+        return std::make_unique<D3DRenderSession>(renderer);
+#endif
+        break;
     }
-    Q_UNREACHABLE();
     return {};
 }
 
-RenderSessionBase::RenderSessionBase(RendererPtr renderer,
-    const QString &basePath, QObject *parent)
+RenderSessionBase::RenderSessionBase(RendererPtr renderer, QObject *parent)
     : RenderTask(std::move(renderer), parent)
-    , mBasePath(basePath)
 {
 }
 
@@ -41,8 +44,7 @@ void RenderSessionBase::prepare(bool itemsChanged,
     Q_ASSERT(onMainThread());
     mItemsChanged = itemsChanged;
     mEvaluationType = evaluationType;
-    mPrevMessages.swap(mMessages);
-    mMessages.clear();
+    mPrevMessages = std::exchange(mMessages, {});
 
     if (itemsChanged)
         invalidateCachedProperties();
@@ -69,6 +71,7 @@ void RenderSessionBase::configure()
     }
 
     mScriptSession->beginSessionUpdate();
+    mBindingValues.clear();
 
     // collect items to evaluate, since doing so can modify list
     auto itemsToEvaluate = QVector<const Item *>();
@@ -89,12 +92,22 @@ void RenderSessionBase::configure()
             if (Singletons::fileCache().getSource(script->fileName, &source))
                 scriptEngine.evaluateScript(source, script->fileName);
         } else if (auto binding = castItem<Binding>(item)) {
-            // evaluate each binding only once
-            auto &values = mUniformBindingValues[binding->id];
-            // set global in script state
-            values = scriptEngine.evaluateValues(binding->values, binding->id);
-            scriptEngine.setGlobal(binding->name, values);
+            // evaluate bindings with script objects, since they are setting globals
+            evaluateBindingValues(*binding, scriptEngine);
         }
+    }
+}
+
+void RenderSessionBase::evaluateBindingValues(const Binding &binding,
+    ScriptEngine &scriptEngine)
+{
+    auto &values = mBindingValues[binding.id];
+    if (values.isEmpty()) {
+        values = scriptEngine.evaluateValues(binding.values, binding.id);
+
+        // set global in script state
+        scriptEngine.setGlobal(binding.name, values);
+        mUsedItems += binding.id;
     }
 }
 
@@ -107,35 +120,6 @@ void RenderSessionBase::configured()
     if (mEvaluationType != EvaluationType::Steady
         && Singletons::synchronizeLogic().resetRenderSessionInvalidationState())
         mItemsChanged = true;
-}
-
-void RenderSessionBase::finish()
-{
-    Q_ASSERT(onMainThread());
-    auto &editors = Singletons::editorManager();
-
-    editors.setAutoRaise(false);
-
-    for (auto itemId : mModifiedTextures.keys())
-        if (auto fileItem =
-                castItem<FileItem>(mSessionModelCopy.findItem(itemId)))
-            if (auto editor = editors.openTextureEditor(fileItem->fileName))
-                editor->replace(mModifiedTextures[itemId], false);
-    mModifiedTextures.clear();
-
-    for (auto itemId : mModifiedBuffers.keys())
-        if (auto fileItem =
-                castItem<FileItem>(mSessionModelCopy.findItem(itemId)))
-            if (auto editor = editors.openBinaryEditor(fileItem->fileName))
-                editor->replace(mModifiedBuffers[itemId], false);
-    mModifiedBuffers.clear();
-
-    editors.setAutoRaise(true);
-
-    mPrevMessages.clear();
-
-    QMutexLocker lock{ &mUsedItemsCopyMutex };
-    mUsedItemsCopy = mUsedItems;
 }
 
 void RenderSessionBase::release()
@@ -210,6 +194,14 @@ void RenderSessionBase::updateCachedProperties(ItemId itemId, QList<int> values)
     mPropertyCache[itemId] = values;
 }
 
+std::optional<size_t> RenderSessionBase::addTimeQuery(ItemId callId)
+{
+    if (mTimeQueryCallIds.size() >= maxTimeQueries)
+        return std::nullopt;
+    mTimeQueryCallIds.push_back(callId);
+    return mTimeQueryCallIds.size() - 1;
+}
+
 void RenderSessionBase::evaluateBlockProperties(const Block &block, int *offset,
     int *rowCount, bool cached)
 {
@@ -222,12 +214,13 @@ void RenderSessionBase::evaluateBlockProperties(const Block &block, int *offset,
 
     const auto evaluate = [&](ScriptEngine &engine) {
         Q_ASSERT(offset && rowCount);
+        const auto guard = engine.beginSettingFirstError(block.id);
         *offset = engine.evaluateInt(block.offset, block.id);
         *rowCount = engine.evaluateInt(block.rowCount, block.id);
-        updateCachedProperties(block.id, { *offset, *rowCount });
     };
     if (mScriptSession) {
         dispatchToRenderThread([&]() { evaluate(mScriptSession->engine()); });
+        updateCachedProperties(block.id, { *offset, *rowCount });
     } else {
         evaluate(Singletons::defaultScriptEngine());
     }
@@ -247,15 +240,16 @@ void RenderSessionBase::evaluateTextureProperties(const Texture &texture,
 
     const auto evaluate = [&](ScriptEngine &engine) {
         Q_ASSERT(width && height && depth && layers);
+        const auto guard = engine.beginSettingFirstError(texture.id);
         *width = engine.evaluateInt(texture.width, texture.id);
         *height = engine.evaluateInt(texture.height, texture.id);
         *depth = engine.evaluateInt(texture.depth, texture.id);
         *layers = engine.evaluateInt(texture.layers, texture.id);
-        updateCachedProperties(texture.id,
-            { *width, *height, *depth, *layers });
     };
     if (mScriptSession) {
         dispatchToRenderThread([&]() { evaluate(mScriptSession->engine()); });
+        updateCachedProperties(texture.id,
+            { *width, *height, *depth, *layers });
     } else {
         evaluate(Singletons::defaultScriptEngine());
     }
@@ -274,14 +268,39 @@ void RenderSessionBase::evaluateTargetProperties(const Target &target,
 
     const auto evaluate = [&](ScriptEngine &engine) {
         Q_ASSERT(width && height && layers);
+        const auto guard = engine.beginSettingFirstError(target.id);
         *width = engine.evaluateInt(target.defaultWidth, target.id);
         *height = engine.evaluateInt(target.defaultHeight, target.id);
         *layers = engine.evaluateInt(target.defaultLayers, target.id);
-        updateCachedProperties(target.id, { *width, *height, *layers });
     };
     if (mScriptSession) {
         dispatchToRenderThread([&]() { evaluate(mScriptSession->engine()); });
+        updateCachedProperties(target.id, { *width, *height, *layers });
     } else {
         evaluate(Singletons::defaultScriptEngine());
     }
+}
+
+void RenderSessionBase::obtainTimeQueryResults()
+{
+    // TODO: remove when message list performance issue is resolved
+    if (updatingPreviewTextures()) {
+        resetTimeQueries(0);
+        mTimeQueryCallIds.clear();
+        return;
+    }
+
+    mTimeQueryMessages.clear();
+    auto total = std::chrono::duration<double>::zero();
+    for (const auto &duration : resetTimeQueries(timeQueryCount())) {
+        const auto itemId = mTimeQueryCallIds[mTimeQueryMessages.size()];
+        mTimeQueryMessages.insert(itemId, MessageType::CallDuration,
+            formatDuration(duration), false);
+        total += duration;
+    }
+    mTimeQueryCallIds.clear();
+
+    if (mTimeQueryMessages.size() > 1)
+        mTimeQueryMessages.insert(0, MessageType::TotalDuration,
+            formatDuration(total), false);
 }

@@ -1,7 +1,7 @@
 #include "SynchronizeLogic.h"
 #include "FileCache.h"
-#include "Settings.h"
 #include "Singletons.h"
+#include "InputState.h"
 #include "VideoManager.h"
 #include "editors/EditorManager.h"
 #include "editors/binary/BinaryEditor.h"
@@ -10,8 +10,9 @@
 #include "render/ProcessSource.h"
 #include "render/RenderSessionBase.h"
 #include "session/SessionModel.h"
-#include "session/PropertiesEditor.h"
-#include "scripting/ScriptSession.h"
+#include "session/properties/PropertiesEditor.h"
+#include "scripting/ScriptTimeout.h"
+#include "scripting/ScriptEngine.h"
 #include <QTimer>
 #include <QMetaEnum>
 
@@ -64,18 +65,29 @@ SynchronizeLogic::SynchronizeLogic(QObject *parent)
         &SynchronizeLogic::handleEvaluateTimout);
     connect(mProcessSourceTimer, &QTimer::timeout, this,
         &SynchronizeLogic::processSource);
+    connect(&mModel, &SessionModel::itemRenamed, this,
+        &SynchronizeLogic::handleItemRenamed);
     connect(&mModel, &SessionModel::dataChanged, this,
         &SynchronizeLogic::handleItemsModified);
     connect(&mModel, &SessionModel::rowsInserted, this,
-        &SynchronizeLogic::handleItemReordered);
+        &SynchronizeLogic::handleItemAdded);
     connect(&mModel, &SessionModel::rowsAboutToBeRemoved, this,
-        &SynchronizeLogic::handleItemReordered);
+        &SynchronizeLogic::handleItemRemoved);
     connect(&Singletons::fileCache(), &FileCache::fileChanged, this,
         &SynchronizeLogic::handleFileChanged);
     connect(&Singletons::editorManager(), &EditorManager::editorRenamed, this,
         &SynchronizeLogic::handleEditorFileRenamed);
     connect(&Singletons::editorManager(), &EditorManager::viewportSizeChanged,
         this, &SynchronizeLogic::handleViewportSizeChanged);
+
+    connect(&Singletons::inputState(), &InputState::frameIndexChanged, this,
+        &SynchronizeLogic::invalidateRenderSession);
+    connect(&Singletons::inputState(), &InputState::timeChanged, this,
+        &SynchronizeLogic::invalidateRenderSession);
+    connect(&Singletons::inputState(), &InputState::mouseChanged, this,
+        &SynchronizeLogic::handleMouseStateChanged);
+    connect(&Singletons::inputState(), &InputState::keysChanged, this,
+        &SynchronizeLogic::handleKeyboardStateChanged);
 
     mUpdateEditorsTimer->start(100);
     mEvaluationTimer->setTimerType(Qt::PreciseTimer);
@@ -100,8 +112,11 @@ void SynchronizeLogic::setProcessSourceType(QString type)
 
 void SynchronizeLogic::setCurrentEditorFileName(QString fileName)
 {
-    if (std::exchange(mCurrentEditorFileName, fileName) != fileName)
+    if (std::exchange(mCurrentEditorFileName, fileName) != fileName) {
         mProcessSourceTimer->start();
+
+        Q_EMIT currentEditorChanged(fileName);
+    }
 }
 
 void SynchronizeLogic::setCurrentEditorSourceType(SourceType sourceType)
@@ -110,34 +125,51 @@ void SynchronizeLogic::setCurrentEditorSourceType(SourceType sourceType)
         mProcessSourceTimer->start();
 }
 
-void SynchronizeLogic::initializeRenderSession()
+bool SynchronizeLogic::initializeRenderSession()
 {
-    const auto sessionRenderer = Singletons::sessionRenderer();
-    if (mRenderSession && &mRenderSession->renderer() == sessionRenderer.get())
-        return;
+    if (mRenderSession)
+        return true;
 
-    const auto basePath = QFileInfo(mSessionFileName).path();
-    mRenderSession = RenderSessionBase::create(sessionRenderer, basePath);
+    const auto sessionRenderer = Singletons::sessionRenderer();
+    if (!sessionRenderer)
+        return false;
+
+    mRenderSession = RenderSessionBase::create(sessionRenderer);
+    if (!mRenderSession)
+        return false;
+
+    connect(mRenderSession.get(), &RenderTask::preparing, this,
+        &SynchronizeLogic::handlePreparingEvaluation);
     connect(mRenderSession.get(), &RenderTask::updated, this,
-        &SynchronizeLogic::handleSessionRendered);
+        &SynchronizeLogic::handleEvaluated);
 
     mProcessSource = std::make_unique<ProcessSource>(sessionRenderer);
     connect(mProcessSource.get(), &ProcessSource::outputChanged, this,
         &SynchronizeLogic::outputChanged);
+
+    return true;
+}
+
+void SynchronizeLogic::finishEvaluation()
+{
+    if (mRenderSession)
+        mRenderSession->renderer().finish();
 }
 
 void SynchronizeLogic::resetRenderSession()
 {
+    interruptRunningScriptEngines();
     mRenderSession.reset();
     mProcessSource.reset();
+    Singletons::defaultScriptEngine().resetMessages();
     Singletons::videoManager().unloadAll();
     Singletons::fileCache().unloadAll();
+    Singletons::inputState().reset();
 }
 
 void SynchronizeLogic::resetEvaluation()
 {
     evaluate(EvaluationType::Reset);
-    Singletons::videoManager().rewindVideoFiles();
 }
 
 void SynchronizeLogic::manualEvaluation()
@@ -156,24 +188,20 @@ void SynchronizeLogic::setEvaluationMode(EvaluationMode mode)
     }
 
     mEvaluationMode = mode;
+    Q_EMIT evaluationModeChanged(mEvaluationMode);
 
     if (mEvaluationMode == EvaluationMode::Steady) {
-        mEvaluationTimer->setSingleShot(false);
-        mEvaluationTimer->start(1);
-        Singletons::videoManager().playVideoFiles();
+        triggerEvaluation(EvaluationType::Steady);
     } else if (mEvaluationMode == EvaluationMode::Automatic) {
         mEvaluationTimer->stop();
-        mEvaluationTimer->setSingleShot(true);
         if (mRenderSessionInvalidated)
-            mEvaluationTimer->start(0);
+            triggerEvaluation(EvaluationType::Automatic);
         if (mRenderSession)
             Singletons::sessionModel().setActiveItems(
                 mRenderSession->usedItems());
-        Singletons::videoManager().pauseVideoFiles();
     } else {
         mEvaluationTimer->stop();
         Singletons::sessionModel().setActiveItems({});
-        Singletons::videoManager().pauseVideoFiles();
     }
 }
 
@@ -185,14 +213,6 @@ bool SynchronizeLogic::resetRenderSessionInvalidationState()
         return true;
     }
     return false;
-}
-
-void SynchronizeLogic::handleSessionRendered()
-{
-    Singletons::fileCache().updateFromEditors();
-
-    if (mEvaluationMode != EvaluationMode::Paused && mRenderSession)
-        Singletons::sessionModel().setActiveItems(mRenderSession->usedItems());
 }
 
 void SynchronizeLogic::handleFileChanged(const QString &fileName)
@@ -223,60 +243,73 @@ void SynchronizeLogic::handleItemsModified(const QModelIndex &topLeft,
 void SynchronizeLogic::invalidateRenderSession()
 {
     mRenderSessionInvalidated = true;
-
     if (mEvaluationMode == EvaluationMode::Automatic)
-        mEvaluationTimer->start(50);
+        triggerEvaluation(EvaluationType::Automatic, 10);
+}
+
+void SynchronizeLogic::handleItemRenamed(const QModelIndex &index,
+    const QString &prevName)
+{
+    Q_ASSERT(index.column() == SessionModel::Name);
+    if (auto fileItem = mModel.item<FileItem>(index))
+        handleFileItemRenamed(*fileItem, prevName);
+}
+
+void SynchronizeLogic::handleItemAdded(const QModelIndex &parent, int first)
+{
+    invalidateRenderSession();
+    Q_EMIT itemAdded(&mModel.getItem(mModel.index(first, 0, parent)));
+}
+
+void SynchronizeLogic::handleItemRemoved(const QModelIndex &parent, int first)
+{
+    invalidateRenderSession();
+    Q_EMIT itemRemoved(&mModel.getItem(mModel.index(first, 0, parent)));
 }
 
 void SynchronizeLogic::handleItemModified(const QModelIndex &index)
 {
-    if (auto fileItem = mModel.item<FileItem>(index)) {
-        if (index.column() == SessionModel::Name)
-            handleFileItemRenamed(*fileItem);
-        else if (index.column() == SessionModel::FileName)
-            handleFileItemFileChanged(*fileItem);
-    }
+    const auto &item = mModel.getItem(index);
 
-    if (auto call = mModel.item<Call>(index))
+    if (auto fileItem = castItem<FileItem>(item))
+        if (index.column() == SessionModel::FileName)
+            handleFileItemFileChanged(*fileItem);
+
+    if (auto call = castItem<Call>(item))
         if (index.column() == SessionModel::CallType
             && hasDefaultName<Call::CallType>(*call))
             mModel.setData(mModel.getIndex(index, SessionModel::Name),
                 getValueName(call->callType));
 
-    if (auto buffer = mModel.item<Buffer>(index)) {
+    if (auto buffer = castItem<Buffer>(item)) {
         mEditorItemsModified.insert(buffer->id);
-    } else if (auto block = mModel.item<Block>(index)) {
+    } else if (auto block = castItem<Block>(item)) {
         mEditorItemsModified.insert(block->parent->id);
-    } else if (auto field = mModel.item<Field>(index)) {
+    } else if (auto field = castItem<Field>(item)) {
         mEditorItemsModified.insert(field->parent->parent->id);
-    } else if (auto texture = mModel.item<Texture>(index)) {
+    } else if (auto texture = castItem<Texture>(item)) {
         mEditorItemsModified.insert(texture->id);
     }
 
-    if (mRenderSession
-        && mRenderSession->usedItems().contains(mModel.getItemId(index))) {
+    if (mRenderSession && mRenderSession->usedItems().contains(item.id)) {
         invalidateRenderSession();
     } else if (index.column() == SessionModel::ScriptExecuteOn) {
         invalidateRenderSession();
-    } else if (auto call = mModel.item<Call>(index)) {
+    } else if (auto call = castItem<Call>(item)) {
         if (call->checked
             && call->executeOn == Call::ExecuteOn::EveryEvaluation)
             invalidateRenderSession();
-    } else if (mModel.item<Group>(index)) {
+    } else if (castItem<Group>(item)) {
         invalidateRenderSession();
-    } else if (mModel.item<Binding>(index)) {
+    } else if (index.column() == SessionModel::Name
+        && (castItem<Binding>(item) || castItem<Attribute>(item))) {
         invalidateRenderSession();
     }
 
-    if (mModel.item<Session>(index)) {
+    if (castItem<Session>(item)) {
         mProcessSourceTimer->start();
     }
-}
-
-void SynchronizeLogic::handleItemReordered(const QModelIndex &parent, int first)
-{
-    invalidateRenderSession();
-    handleItemModified(mModel.index(first, 0, parent));
+    Q_EMIT itemModified(&item);
 }
 
 void SynchronizeLogic::handleEditorFileRenamed(const QString &prevFileName,
@@ -315,11 +348,25 @@ void SynchronizeLogic::handleFileItemFileChanged(const FileItem &item)
         mModel.setData(mModel.getIndex(&item, SessionModel::Name), name);
 }
 
-void SynchronizeLogic::handleFileItemRenamed(const FileItem &item)
+void SynchronizeLogic::handleFileItemRenamed(const FileItem &item,
+    const QString &prevName)
 {
+    // change filename only when item name previously matched the filename
+    // and new name also has a suffix
     if (item.fileName.isEmpty()
-        || FileDialog::getFileTitle(item.fileName) == item.name)
+        || FileDialog::getFileTitle(item.fileName) != prevName
+        || FileDialog::getFileTitle(item.fileName) == item.name
+        || QFileInfo(item.name).suffix().isEmpty())
         return;
+
+    // do not rename file when changing name to/from sequence name
+    if (FileDialog::isSequenceFileName(item.name)
+        != FileDialog::isSequenceFileName(prevName)) {
+        const auto fileName = toNativeCanonicalFilePath(
+            QFileInfo(item.fileName).dir().filePath(item.name));
+        mModel.setData(mModel.getIndex(&item, SessionModel::FileName),
+            fileName);
+    }
 
     mModel.beginUndoMacro("Update filename");
 
@@ -377,19 +424,65 @@ void SynchronizeLogic::handleFileItemRenamed(const FileItem &item)
     Singletons::editorManager().renameEditors(prevFileName, item.fileName);
 }
 
+void SynchronizeLogic::triggerEvaluation(EvaluationType type, int delayMs)
+{
+    if (!mEvaluationTimer->isActive()) {
+        mPendingEvaluationType = type;
+        mEvaluationTimer->start(delayMs);
+    } else {
+        mPendingEvaluationType = std::max(mPendingEvaluationType, type);
+    }
+}
+
 void SynchronizeLogic::handleEvaluateTimout()
 {
-    evaluate(mEvaluationMode == EvaluationMode::Automatic
-            ? EvaluationType::Automatic
-            : EvaluationType::Steady);
+    evaluate(mPendingEvaluationType);
 }
 
 void SynchronizeLogic::evaluate(EvaluationType evaluationType)
 {
+    // interrupt script engines when resetting twice
+    if (mEvaluationType == EvaluationType::Reset)
+        interruptRunningScriptEngines();
+
+    // reset messages of default script engine
+    const auto prevMessages = Singletons::defaultScriptEngine().resetMessages();
+
+    const auto sessionRenderer = Singletons::sessionRenderer();
+    if (mRenderSession && &mRenderSession->renderer() != sessionRenderer.get())
+        resetRenderSession();
+
+    mEvaluationType = std::max(mEvaluationType, evaluationType);
+    if (initializeRenderSession())
+        mRenderSession->update();
+}
+
+void SynchronizeLogic::handlePreparingEvaluation(bool &itemsChanged,
+    EvaluationType &evaluationType)
+{
     Singletons::fileCache().updateFromEditors();
-    const auto itemsChanged = std::exchange(mRenderSessionInvalidated, false);
-    initializeRenderSession();
-    mRenderSession->update(itemsChanged, evaluationType);
+    Q_EMIT waitingForSync();
+
+    itemsChanged = mRenderSessionInvalidated;
+    evaluationType = mEvaluationType;
+
+    Singletons::inputState().update(mEvaluationType);
+    Singletons::videoManager().seek(Singletons::inputState().time());
+
+    mEvaluationType = EvaluationType::Steady;
+    mRenderSessionInvalidated = false;
+    mEvaluationTimer->stop();
+}
+
+void SynchronizeLogic::handleEvaluated()
+{
+    Singletons::fileCache().updateFromEditors();
+
+    if (mEvaluationMode != EvaluationMode::Paused && mRenderSession)
+        Singletons::sessionModel().setActiveItems(mRenderSession->usedItems());
+
+    if (mEvaluationMode == EvaluationMode::Steady)
+        triggerEvaluation(EvaluationType::Steady);
 }
 
 void SynchronizeLogic::updateEditors()
@@ -477,8 +570,10 @@ void SynchronizeLogic::processSource()
         || !Singletons::editorManager().getSourceEditor(mCurrentEditorFileName))
         return;
 
+    if (!initializeRenderSession())
+        return;
+
     Singletons::fileCache().updateFromEditors();
-    initializeRenderSession();
     mProcessSource->setFileName(mCurrentEditorFileName);
     mProcessSource->setSourceType(mCurrentEditorSourceType);
     mProcessSource->setValidateSource(mValidateSource);
@@ -488,24 +583,22 @@ void SynchronizeLogic::processSource()
 
 void SynchronizeLogic::handleSessionFileNameChanged(const QString &fileName)
 {
-    mSessionFileName = toNativeCanonicalFilePath(fileName);
-    resetRenderSession();
+    Q_ASSERT(FileDialog::isEmptyOrUntitled(fileName)
+        || QDir::current() == QFileInfo(fileName).dir());
 }
 
 void SynchronizeLogic::handleMouseStateChanged()
 {
-    if (mRenderSession && mRenderSession->usesMouseState()) {
+    if (mRenderSession && mRenderSession->usesMouseState())
         if (mEvaluationMode == EvaluationMode::Automatic)
-            evaluate(EvaluationType::Steady);
-    }
+            triggerEvaluation(EvaluationType::Steady);
 }
 
 void SynchronizeLogic::handleKeyboardStateChanged()
 {
-    if (mRenderSession && mRenderSession->usesKeyboardState()) {
+    if (mRenderSession && mRenderSession->usesKeyboardState())
         if (mEvaluationMode == EvaluationMode::Automatic)
-            evaluate(EvaluationType::Steady);
-    }
+            triggerEvaluation(EvaluationType::Steady);
 }
 
 void SynchronizeLogic::handleViewportSizeChanged(const QString &fileName)
@@ -517,22 +610,22 @@ void SynchronizeLogic::handleViewportSizeChanged(const QString &fileName)
 void SynchronizeLogic::evaluateBlockProperties(const Block &block, int *offset,
     int *rowCount)
 {
-    initializeRenderSession();
-    mRenderSession->evaluateBlockProperties(block, offset, rowCount, false);
+    if (initializeRenderSession())
+        mRenderSession->evaluateBlockProperties(block, offset, rowCount, false);
 }
 
 void SynchronizeLogic::evaluateTextureProperties(const Texture &texture,
     int *width, int *height, int *depth, int *layers)
 {
-    initializeRenderSession();
-    mRenderSession->evaluateTextureProperties(texture, width, height, depth,
-        layers, false);
+    if (initializeRenderSession())
+        mRenderSession->evaluateTextureProperties(texture, width, height, depth,
+            layers, false);
 }
 
 void SynchronizeLogic::evaluateTargetProperties(const Target &target,
     int *width, int *height, int *layers)
 {
-    initializeRenderSession();
-    mRenderSession->evaluateTargetProperties(target, width, height, layers,
-        false);
+    if (initializeRenderSession())
+        mRenderSession->evaluateTargetProperties(target, width, height, layers,
+            false);
 }

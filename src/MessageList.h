@@ -2,18 +2,18 @@
 
 #include <QSet>
 #include <QSharedPointer>
-#include <QString>
 #include <chrono>
 
 using ItemId = int;
 using MessageId = qulonglong;
 using MessagePtr = QSharedPointer<const struct Message>;
-using MessagePtrSet = QSet<MessagePtr>;
 
 enum class MessageType {
     None,
+    NotImplemented,
     OpenGLVersionNotAvailable,
     VulkanNotAvailable,
+    Direct3DNotAvailable,
     LoadingFileFailed,
     ConvertingFileFailed,
     UnsupportedShaderType,
@@ -64,10 +64,10 @@ enum class MessageType {
     TooManyPrintfCalls,
     RenderingFailed,
     MoreThanOneDepthStencilAttachment,
+    TooManyColorAttachments,
     IncompatibleBindings,
     CreatingPipelineFailed,
     OpenGLRendererRequiresGLSL,
-    SubroutinesNotAvailableInVulkan,
     OpenGLRequiresCombinedTextureSamplers,
     CantSampleAttachment,
     SampleCountMismatch,
@@ -75,9 +75,9 @@ enum class MessageType {
     MaxPushConstantSizeExceeded,
     MaxVariableBindGroupEntriesExceeded,
     OnlyLastBindingMayBeUnsizedArray,
-    TextureBuffersNotAvailable,
     RayTracingNotAvailable,
     MeshShadersNotAvailable,
+    SpirvCrossError,
 };
 
 struct Message
@@ -90,12 +90,54 @@ struct Message
     int line;
 };
 
-namespace MessageList {
-    MessagePtr insert(QString fileName, int line, MessageType type,
-        QString text = "", bool deduplicate = true);
-    MessagePtr insert(ItemId itemId, MessageType type, QString text = "",
-        bool deduplicate = true);
-    QList<MessagePtr> messages();
-}; // namespace MessageList
+enum class MessageSeverity {
+    Error,
+    Warning,
+    Info,
+};
+
+class MessagePtrSet : QSet<MessagePtr>
+{
+public:
+    static MessagePtr makeMessage(ItemId itemId, MessageType type, QString text,
+        QString fileName, int line, bool deduplicate = true);
+    static QList<MessagePtr> getAllMessages();
+
+    using QSet::clear;
+    using QSet::insert;
+    using QSet::size;
+
+    MessagePtrSet &operator+=(const MessagePtr &message)
+    {
+        QSet::operator+=(message);
+        return *this;
+    }
+
+    MessagePtrSet &operator+=(const MessagePtrSet &other)
+    {
+        QSet::operator+=(other);
+        return *this;
+    }
+
+    void insert(QString fileName, int line, MessageType type, QString text = "",
+        bool deduplicate = true)
+    {
+        insert(makeMessage(0, type, text, fileName, line, deduplicate));
+    }
+
+    void insert(ItemId itemId, MessageType type, QString text = "",
+        bool deduplicate = true)
+    {
+        insert(makeMessage(itemId, type, text, "", 0, deduplicate));
+    }
+
+    void insert(ItemId itemId, MessageType type, QString text, QString fileName,
+        int line, bool deduplicate = true)
+    {
+        insert(makeMessage(itemId, type, text, fileName, line, deduplicate));
+    }
+};
 
 QString formatDuration(const std::chrono::duration<double> &duration);
+MessageSeverity getMessageSeverity(const Message &message);
+QString getMessageText(const Message &message);

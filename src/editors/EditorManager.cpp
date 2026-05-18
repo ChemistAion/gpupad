@@ -11,7 +11,6 @@
 #include "texture/TextureEditor.h"
 #include "texture/TextureEditorToolBar.h"
 #include "texture/TextureInfoBar.h"
-#include <QAction>
 #include <QApplication>
 #include <QBoxLayout>
 #include <QClipboard>
@@ -19,7 +18,6 @@
 #include <QMimeData>
 #include <QRandomGenerator>
 #include <QToolBar>
-#include <QToolButton>
 #include <functional>
 
 EditorManager::EditorManager(QWidget *parent)
@@ -29,7 +27,7 @@ EditorManager::EditorManager(QWidget *parent)
 {
     setWindowFlags(Qt::Widget);
     setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
-    setDockOptions(AnimatedDocks | AllowNestedDocks | AllowTabbedDocks);
+    setDockOptions(AllowNestedDocks | AllowTabbedDocks);
     setDocumentMode(true);
     setContentsMargins(0, 1, 0, 0);
 
@@ -48,7 +46,7 @@ QWidget *EditorManager::createEditorPropertiesPanel(QAction *showAction)
 {
     auto propertiesPanel = new QWidget(this);
     propertiesPanel->setAutoFillBackground(true);
-    propertiesPanel->setBackgroundRole(QPalette::ToolTipBase);
+    propertiesPanel->setBackgroundRole(QPalette::AlternateBase);
     propertiesPanel->hide();
 
     auto layout = new QHBoxLayout(propertiesPanel);
@@ -144,10 +142,9 @@ void EditorManager::updateEditorPropertiesVisibility()
 
 bool EditorManager::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() == QEvent::Resize ||
-        event->type() == QEvent::Show)
+    if (event->type() == QEvent::Resize || event->type() == QEvent::Show)
         if (auto dock = qobject_cast<QDockWidget *>(watched))
-            if (auto editor = mDocks[dock])
+            if (auto editor = getEditor(dock))
                 Q_EMIT viewportSizeChanged(editor->fileName());
 
     return DockWindow::eventFilter(watched, event);
@@ -222,6 +219,12 @@ IEditor *EditorManager::currentEditor()
     return nullptr;
 }
 
+IEditor *EditorManager::getEditor(const QDockWidget *dock)
+{
+    const auto it = mDocks.find(const_cast<QDockWidget *>(dock));
+    return (it != mDocks.end() ? it->second : nullptr);
+}
+
 QDockWidget *EditorManager::findEditorDock(const IEditor *editor) const
 {
     for (auto [dock, dockEditor] : mDocks)
@@ -283,8 +286,39 @@ void EditorManager::closeUntitledUntouchedSourceEditor()
     }
 }
 
+IEditor *EditorManager::openEditor(const FileItem &fileItem)
+{
+    switch (fileItem.type) {
+    case Item::Type::Texture: return openTextureEditor(fileItem.fileName, true);
+
+    case Item::Type::Script: {
+        auto editor = openSourceEditor(fileItem.fileName, true);
+        if (editor)
+            editor->setSourceType(SourceType::JavaScript);
+        return editor;
+    }
+
+    case Item::Type::Shader: {
+        auto editor = openSourceEditor(fileItem.fileName, true);
+        if (editor)
+            if (auto shader = castItem<Shader>(fileItem)) {
+                const auto sourceType = getSourceType(*shader);
+                if (sourceType != SourceType::PlainText)
+                    editor->setSourceType(sourceType);
+            }
+        return editor;
+    }
+
+    case Item::Type::Buffer: return openBinaryEditor(fileItem.fileName, true);
+
+    default: return nullptr;
+    }
+}
 IEditor *EditorManager::openEditor(const QString &fileName, bool asBinaryFile)
 {
+    if (fileName.isEmpty())
+        return nullptr;
+
     if (!asBinaryFile) {
         if (fileName.endsWith(".qml", Qt::CaseInsensitive)) {
             const auto modifiers = QApplication::queryKeyboardModifiers();
@@ -301,14 +335,17 @@ IEditor *EditorManager::openEditor(const QString &fileName, bool asBinaryFile)
     return openBinaryEditor(fileName);
 }
 
-SourceEditor *EditorManager::openSourceEditor(const QString &fileName, int line,
-    int column)
+SourceEditor *EditorManager::openSourceEditor(const QString &fileName,
+    bool loadOrCreate, int line, int column)
 {
+    if (fileName.isEmpty())
+        return nullptr;
+
     auto editor = getSourceEditor(fileName);
     if (!editor) {
         editor =
             new SourceEditor(fileName, mSourceEditorToolBar, mFindReplaceBar);
-        if (!editor->load()) {
+        if (!editor->load() && !loadOrCreate) {
             delete editor;
             return nullptr;
         }
@@ -321,12 +358,16 @@ SourceEditor *EditorManager::openSourceEditor(const QString &fileName, int line,
     return editor;
 }
 
-BinaryEditor *EditorManager::openBinaryEditor(const QString &fileName)
+BinaryEditor *EditorManager::openBinaryEditor(const QString &fileName,
+    bool loadOrCreate)
 {
+    if (fileName.isEmpty())
+        return nullptr;
+
     auto editor = getBinaryEditor(fileName);
     if (!editor) {
         editor = new BinaryEditor(fileName, mBinaryEditorToolBar);
-        if (!editor->load()) {
+        if (!editor->load() && !loadOrCreate) {
             delete editor;
             return nullptr;
         }
@@ -336,13 +377,17 @@ BinaryEditor *EditorManager::openBinaryEditor(const QString &fileName)
     return editor;
 }
 
-TextureEditor *EditorManager::openTextureEditor(const QString &fileName)
+TextureEditor *EditorManager::openTextureEditor(const QString &fileName,
+    bool loadOrCreate)
 {
+    if (fileName.isEmpty())
+        return nullptr;
+
     auto editor = getTextureEditor(fileName);
     if (!editor) {
         editor =
             new TextureEditor(fileName, mTextureEditorToolBar, mTextureInfoBar);
-        if (!editor->load()) {
+        if (!editor->load() && !loadOrCreate) {
             delete editor;
             return nullptr;
         }
@@ -355,6 +400,9 @@ TextureEditor *EditorManager::openTextureEditor(const QString &fileName)
 QmlView *EditorManager::openQmlView(const QString &fileName,
     const ScriptEnginePtr &enginePtr)
 {
+    if (fileName.isEmpty())
+        return nullptr;
+
     auto editor = getQmlView(fileName);
     // recreate dock when engine changed
     if (enginePtr && editor && editor->enginePtr() != enginePtr) {
@@ -377,6 +425,24 @@ QmlView *EditorManager::openQmlView(const QString &fileName,
     }
     autoRaise(editor);
     return editor;
+}
+
+EditorType EditorManager::getEditorType(const QString &fileName)
+{
+    if (auto editor = getSourceEditor(fileName))
+        switch (editor->sourceType()) {
+        case SourceType::Generic:
+        case SourceType::PlainText:  return EditorType::Text;
+        case SourceType::JavaScript: return EditorType::Script;
+        default:                     return EditorType::Shader;
+        }
+    if (getBinaryEditor(fileName))
+        return EditorType::Binary;
+    if (getTextureEditor(fileName))
+        return EditorType::Texture;
+    if (getQmlView(fileName))
+        return EditorType::QmlView;
+    return EditorType::None;
 }
 
 IEditor *EditorManager::getEditor(const QString &fileName)
@@ -757,6 +823,7 @@ bool EditorManager::promptSaveDock(QDockWidget *dock)
 
 void EditorManager::closeDock(QDockWidget *dock)
 {
+    Q_ASSERT(dock);
     auto editor = mDocks[dock];
     Q_EMIT editorRenamed(editor->fileName(), "");
 

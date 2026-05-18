@@ -1,18 +1,21 @@
 #include "ScriptEngine.h"
 #include "FileDialog.h"
-#include "Singletons.h"
+#include "ScriptTimeout.h"
 #include "objects/ConsoleScriptObject.h"
 #include "objects/AppScriptObject.h"
 #include "session/SessionModel.h"
 #include <QTextStream>
 #include <QThread>
-#include <QTimer>
+#include <QMutex>
 
 #if defined(QtQuick_FOUND)
 #  include <QQmlEngine>
 #endif
 
 namespace {
+    QMutex gFirstErrorMutex;
+    QMap<ItemId, MessagePtr> gFirstError;
+
     void getFlattenedValuesRec(const QJSValue &value, ScriptValueList *values)
     {
         if (value.isObject() || value.isArray()) {
@@ -33,16 +36,42 @@ namespace {
         getFlattenedValuesRec(value, &values);
         return values;
     }
+
+    void setFirstError(ItemId itemId, MessagePtr messagePtr)
+    {
+        const auto lock = QMutexLocker(&gFirstErrorMutex);
+        auto &firstError = gFirstError[itemId];
+        if (!firstError)
+            firstError = messagePtr;
+    }
 } // namespace
 
-ScriptEnginePtr ScriptEngine::make(const QString &basePath, QThread *thread,
+void ScriptEngine::resetFirstError(ItemId itemId)
+{
+    const auto lock = QMutexLocker(&gFirstErrorMutex);
+    gFirstError.remove(itemId);
+}
+
+ScriptEnginePtr ScriptEngine::make(const QString &actionId,
+    const QString &mainScriptFileName, QThread *thread, QObject *parent)
+{
+    const auto basePath = QFileInfo(mainScriptFileName).absoluteDir();
+    auto engine = make(basePath, thread, parent);
+    engine->mActionId = actionId;
+    engine->mMainScriptFileName = mainScriptFileName;
+    return engine;
+}
+
+ScriptEnginePtr ScriptEngine::make(const QDir &basePath, QThread *thread,
     QObject *parent)
 {
     auto engine = ScriptEnginePtr(new ScriptEngine(parent));
     if (thread && thread != QThread::currentThread()) {
         engine->moveToThread(thread);
-        QMetaObject::invokeMethod(engine.get(), "initialize",
-            Qt::BlockingQueuedConnection, engine, basePath);
+        QMetaObject::invokeMethod(
+            engine.get(),
+            [engine, basePath]() { engine->initialize(engine, basePath); },
+            Qt::BlockingQueuedConnection);
     } else {
         engine->initialize(engine, basePath);
     }
@@ -55,8 +84,7 @@ ScriptEngine::ScriptEngine(QObject *parent)
 {
 }
 
-void ScriptEngine::initialize(const ScriptEnginePtr &self,
-    const QString &basePath)
+void ScriptEngine::initialize(const ScriptEnginePtr &self, const QDir &basePath)
 {
 #if defined(QtQuick_FOUND)
     // make a QmlEngine which can be shared with QmlViews
@@ -65,20 +93,13 @@ void ScriptEngine::initialize(const ScriptEnginePtr &self,
     mJsEngine = new QJSEngine(this);
 #endif
 
-    mInterruptThread = new QThread();
-    mInterruptTimer = new QTimer();
-    mInterruptTimer->setSingleShot(true);
-    connect(mInterruptTimer, &QTimer::timeout,
-        [jsEngine = mJsEngine]() { jsEngine->setInterrupted(true); });
-    mInterruptTimer->moveToThread(mInterruptThread);
-    mInterruptThread->start();
-    setTimeout(5000);
-
     mJsEngine->installExtensions(QJSEngine::ConsoleExtension);
     setGlobal("console", mConsoleScriptObject);
 
     auto file = QFile(":/scripting/ScriptEngine.js");
-    file.open(QFile::ReadOnly | QFile::Text);
+    [[maybe_unused]] const auto result =
+        file.open(QFile::ReadOnly | QFile::Text);
+    Q_ASSERT(result);
     mJsEngine->evaluate(QTextStream(&file).readAll());
 
     mAppScriptObject = new AppScriptObject(self, basePath);
@@ -88,33 +109,27 @@ void ScriptEngine::initialize(const ScriptEnginePtr &self,
 ScriptEngine::~ScriptEngine()
 {
     Q_ASSERT(QThread::currentThread() == thread());
-
-    QMetaObject::invokeMethod(mInterruptTimer, "stop",
-        Qt::BlockingQueuedConnection);
-    connect(mInterruptThread, &QThread::finished, mInterruptThread,
-        &QObject::deleteLater);
-    mInterruptThread->requestInterruption();
 }
 
-void ScriptEngine::setOmitReferenceErrors()
+void ScriptEngine::interrupt()
 {
-    mOmitReferenceErrors = true;
+    mJsEngine->setInterrupted(true);
 }
 
-void ScriptEngine::setTimeout(int msec)
+std::shared_ptr<void> ScriptEngine::registerRunning()
 {
-    mInterruptTimer->setInterval(msec);
-}
-
-void ScriptEngine::resetInterruptTimer()
-{
-    // TODO: rethink since this interferes with QmlView
-#if 0
-    Q_ASSERT(&mOnThread == QThread::currentThread());
-    QMetaObject::invokeMethod(mInterruptTimer, "start",
-        Qt::BlockingQueuedConnection);
     mJsEngine->setInterrupted(false);
-#endif
+    registerRunningScriptEngine(this);
+    return std::shared_ptr<void>(nullptr,
+        [&](void *) { deregisterRunningScriptEngine(this); });
+}
+
+std::shared_ptr<void> ScriptEngine::beginSettingFirstError(ItemId itemId)
+{
+    resetFirstError(itemId);
+    mSettingFirstError = true;
+    return std::shared_ptr<void>(nullptr,
+        [this](void *) { mSettingFirstError = false; });
 }
 
 MessagePtrSet ScriptEngine::resetMessages()
@@ -158,10 +173,9 @@ QJSValue ScriptEngine::call(QJSValue &callable, const QJSValueList &args,
     ItemId itemId)
 {
     Q_ASSERT(QThread::currentThread() == thread());
-    mConsoleScriptObject->setItemId(itemId);
-    resetInterruptTimer();
-
-    auto result = callable.call(args);
+    const auto guardRunning = registerRunning();
+    const auto guardConsole = mConsoleScriptObject->setItemId(itemId);
+    const auto result = callable.call(args);
     outputError(result, itemId);
     return result;
 }
@@ -180,10 +194,9 @@ void ScriptEngine::evaluateScript(const QString &script,
 {
     Q_ASSERT(QThread::currentThread() == thread());
     Q_ASSERT(isNativeCanonicalFilePath(fileName));
-    mConsoleScriptObject->setFileName(fileName);
-    resetInterruptTimer();
-
-    auto result = mJsEngine->evaluate(script, fileName);
+    const auto guardRunning = registerRunning();
+    const auto guardConsole = mConsoleScriptObject->setFileName(fileName);
+    const auto result = mJsEngine->evaluate(script, fileName);
     outputError(result, 0);
 }
 
@@ -191,10 +204,9 @@ ScriptValueList ScriptEngine::evaluateValues(const QString &valueExpression,
     ItemId itemId)
 {
     Q_ASSERT(QThread::currentThread() == thread());
-    mConsoleScriptObject->setItemId(itemId);
-    resetInterruptTimer();
-
-    auto result = mJsEngine->evaluate(valueExpression);
+    const auto guardRunning = registerRunning();
+    const auto guardConsole = mConsoleScriptObject->setItemId(itemId);
+    const auto result = mJsEngine->evaluate(valueExpression);
     outputError(result, itemId);
     return getFlattenedValues(result);
 }
@@ -202,10 +214,6 @@ ScriptValueList ScriptEngine::evaluateValues(const QString &valueExpression,
 void ScriptEngine::outputError(const QJSValue &result, ItemId itemId)
 {
     if (!result.isError())
-        return;
-
-    if (result.errorType() == QJSValue::ErrorType::ReferenceError
-        && mOmitReferenceErrors)
         return;
 
     // clean up message
@@ -221,14 +229,14 @@ void ScriptEngine::outputError(const QJSValue &result, ItemId itemId)
     //const auto stack = result.property("stack").toString();
 
     const auto fileName = result.property("fileName").toString();
-    if (!fileName.isEmpty()) {
-        const auto lineNumber = result.property("lineNumber").toInt();
-        mMessages += MessageList::insert(
-            toNativeCanonicalFilePath(QUrl(fileName).toLocalFile()), lineNumber,
-            MessageType::ScriptError, message);
+    const auto lineNumber = result.property("lineNumber").toInt();
+    const auto messagePtr = MessagePtrSet::makeMessage(itemId,
+        MessageType::ScriptError, message,
+        toNativeCanonicalFilePath(QUrl(fileName).toLocalFile()), lineNumber);
+    if (mSettingFirstError) {
+        setFirstError(itemId, messagePtr);
     } else {
-        mMessages +=
-            MessageList::insert(itemId, MessageType::ScriptError, message);
+        mMessages += messagePtr;
     }
 }
 
@@ -301,15 +309,13 @@ void checkValueCount(int valueCount, int offset, int count, ItemId itemId,
         if (valueCount != count) {
             // allow setting 4 components of vec3
             if (valueCount != 4 || count != 3)
-                messages += MessageList::insert(itemId,
-                    MessageType::UniformComponentMismatch,
+                messages.insert(itemId, MessageType::UniformComponentMismatch,
                     QString("(%1/%2)").arg(valueCount).arg(count));
         }
     } else {
         // check that there are enough values
         if (valueCount < count + offset)
-            messages += MessageList::insert(itemId,
-                MessageType::UniformComponentMismatch,
+            messages.insert(itemId, MessageType::UniformComponentMismatch,
                 QString("(%1 < %2)").arg(valueCount).arg(count + offset));
     }
 }

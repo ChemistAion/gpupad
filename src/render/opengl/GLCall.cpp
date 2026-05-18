@@ -5,17 +5,9 @@
 #include "GLStream.h"
 #include "GLTarget.h"
 #include "GLTexture.h"
-#include <QOpenGLTimerQuery>
 #include <cmath>
 
 namespace {
-    template <typename C>
-    auto find(C &container, const QString &name)
-    {
-        const auto it = container.find(name);
-        return (it == container.end() ? nullptr : &it->second);
-    }
-
     QStringView getBaseName(QStringView name)
     {
         if (!name.endsWith(']'))
@@ -66,90 +58,14 @@ namespace {
         }
         return { offset, count };
     }
-
-    bool isImageUniform(const GLProgram::Interface::Uniform &uniform)
-    {
-        switch (uniform.dataType) {
-        case GL_IMAGE_1D:
-        case GL_IMAGE_2D:
-        case GL_IMAGE_3D:
-        case GL_IMAGE_2D_RECT:
-        case GL_IMAGE_CUBE:
-        case GL_IMAGE_BUFFER:
-        case GL_IMAGE_1D_ARRAY:
-        case GL_IMAGE_2D_ARRAY:
-        case GL_IMAGE_CUBE_MAP_ARRAY:
-        case GL_IMAGE_2D_MULTISAMPLE:
-        case GL_IMAGE_2D_MULTISAMPLE_ARRAY:
-        case GL_INT_IMAGE_1D:
-        case GL_INT_IMAGE_2D:
-        case GL_INT_IMAGE_3D:
-        case GL_INT_IMAGE_2D_RECT:
-        case GL_INT_IMAGE_CUBE:
-        case GL_INT_IMAGE_BUFFER:
-        case GL_INT_IMAGE_1D_ARRAY:
-        case GL_INT_IMAGE_2D_ARRAY:
-        case GL_INT_IMAGE_CUBE_MAP_ARRAY:
-        case GL_INT_IMAGE_2D_MULTISAMPLE:
-        case GL_INT_IMAGE_2D_MULTISAMPLE_ARRAY:
-        case GL_UNSIGNED_INT_IMAGE_1D:
-        case GL_UNSIGNED_INT_IMAGE_2D:
-        case GL_UNSIGNED_INT_IMAGE_3D:
-        case GL_UNSIGNED_INT_IMAGE_2D_RECT:
-        case GL_UNSIGNED_INT_IMAGE_CUBE:
-        case GL_UNSIGNED_INT_IMAGE_BUFFER:
-        case GL_UNSIGNED_INT_IMAGE_1D_ARRAY:
-        case GL_UNSIGNED_INT_IMAGE_2D_ARRAY:
-        case GL_UNSIGNED_INT_IMAGE_CUBE_MAP_ARRAY:
-        case GL_UNSIGNED_INT_IMAGE_2D_MULTISAMPLE:
-        case GL_UNSIGNED_INT_IMAGE_2D_MULTISAMPLE_ARRAY: return true;
-        default:                                         return false;
-        }
-    }
-
-    bool isSamplerUniform(const GLProgram::Interface::Uniform &uniform)
-    {
-        switch (uniform.dataType) {
-        case GL_SAMPLER_1D:
-        case GL_SAMPLER_1D_ARRAY:
-        case GL_SAMPLER_1D_ARRAY_SHADOW:
-        case GL_SAMPLER_1D_SHADOW:
-        case GL_SAMPLER_2D:
-        case GL_SAMPLER_2D_ARRAY:
-        case GL_SAMPLER_2D_ARRAY_SHADOW:
-        case GL_SAMPLER_2D_MULTISAMPLE:
-        case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
-        case GL_SAMPLER_2D_SHADOW:
-        case GL_SAMPLER_3D:
-        case GL_SAMPLER_CUBE:
-        case GL_SAMPLER_CUBE_SHADOW:
-        case GL_INT_SAMPLER_1D:
-        case GL_INT_SAMPLER_1D_ARRAY:
-        case GL_INT_SAMPLER_2D:
-        case GL_INT_SAMPLER_2D_ARRAY:
-        case GL_INT_SAMPLER_2D_MULTISAMPLE:
-        case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-        case GL_INT_SAMPLER_3D:
-        case GL_INT_SAMPLER_CUBE:
-        case GL_UNSIGNED_INT_SAMPLER_1D:
-        case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
-        case GL_UNSIGNED_INT_SAMPLER_2D:
-        case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
-        case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
-        case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-        case GL_UNSIGNED_INT_SAMPLER_3D:
-        case GL_UNSIGNED_INT_SAMPLER_CUBE:                 return true;
-        default:                                           return false;
-        }
-    }
-
-    bool isSamplerOnlyUniform(const GLProgram::Interface::Uniform &uniform)
-    {
-        return (uniform.dataType == GL_SAMPLER);
-    }
 } // namespace
 
-GLCall::GLCall(const Call &call) : mCall(call), mKind(getKind(call)) { }
+GLCall::GLCall(const Call &call, const Session &session)
+    : PipelineBase(call.id)
+    , mCall(call)
+    , mKind(getKind(call))
+{
+}
 
 void GLCall::setProgram(GLProgram *program)
 {
@@ -184,7 +100,7 @@ void GLCall::setIndexBuffer(GLBuffer *indices, const Block &block)
             mUsedItems += field->id;
         }
     if (!getIndexType()) {
-        mMessages += MessageList::insert(block.id,
+        mMessages.insert(block.id,
             MessageType::InvalidIndexType,
             QStringLiteral("%1 bytes").arg(mIndexSize));
         return;
@@ -230,7 +146,7 @@ void GLCall::setIndirectBuffer(GLBuffer *commands, const Block &block)
     const auto expectedStride =
         static_cast<int>((mKind.compute ? 3 : 4) * sizeof(uint32_t));
     if (mIndirectStride != expectedStride) {
-        mMessages += MessageList::insert(block.id,
+        mMessages.insert(block.id,
             MessageType::InvalidIndirectStride,
             QStringLiteral("%1/%2 bytes")
                 .arg(mIndirectStride)
@@ -254,44 +170,45 @@ void GLCall::setTextures(GLTexture *texture, GLTexture *fromTexture)
     mFromTexture = fromTexture;
 }
 
-std::shared_ptr<void> GLCall::beginTimerQuery()
+void GLCall::execute(GLContext &context, Bindings &&bindings,
+    MessagePtrSet &messages, ScriptEngine &scriptEngine)
 {
-    if (!mTimerQuery) {
-        mTimerQuery = std::make_shared<QOpenGLTimerQuery>();
-        mTimerQuery->create();
+    if (mProgram) {
+        if (validateShaderTypes() && mProgram->bind()) {
+            setBindings(std::move(bindings));
+            if (updateBindings(scriptEngine))
+                execute(messages, scriptEngine);
+            mProgram->unbind();
+        }
+    } else {
+        execute(messages, scriptEngine);
     }
-    mTimerQuery->begin();
-    return std::shared_ptr<void>(nullptr,
-        [this](void *) { mTimerQuery->end(); });
 }
 
 void GLCall::execute(MessagePtrSet &messages, ScriptEngine &scriptEngine)
 {
     if (mKind.draw || mKind.compute) {
         if (!mProgram) {
-            messages +=
-                MessageList::insert(mCall.id, MessageType::ProgramNotAssigned);
+            messages.insert(mCall.id, MessageType::ProgramNotAssigned);
             return;
         }
     }
 
     if (mKind.draw) {
         if (!mTarget) {
-            messages +=
-                MessageList::insert(mCall.id, MessageType::TargetNotAssigned);
+            messages.insert(mCall.id, MessageType::TargetNotAssigned);
             return;
         }
         mUsedItems += mTarget->usedItems();
     }
 
     if (mKind.indexed && !mIndexBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::IndexBufferNotAssigned);
+        messages.insert(mCall.id, MessageType::IndexBufferNotAssigned);
         return;
     }
 
     if (mKind.indirect && !mIndirectBuffer) {
-        messages += MessageList::insert(mCall.id,
+        messages.insert(mCall.id,
             MessageType::IndirectBufferNotAssigned);
         return;
     }
@@ -310,8 +227,7 @@ void GLCall::execute(MessagePtrSet &messages, ScriptEngine &scriptEngine)
         executeCompute(messages, scriptEngine);
         break;
     case Call::CallType::TraceRays:
-        messages +=
-            MessageList::insert(mCall.id, MessageType::RayTracingNotAvailable);
+        messages.insert(mCall.id, MessageType::RayTracingNotAvailable);
         break;
     case Call::CallType::ClearTexture: executeClearTexture(messages); break;
     case Call::CallType::CopyTexture:  executeCopyTexture(messages); break;
@@ -321,14 +237,11 @@ void GLCall::execute(MessagePtrSet &messages, ScriptEngine &scriptEngine)
     case Call::CallType::SwapBuffers:  executeSwapBuffers(messages); break;
     }
 
-#if GL_VERSION_4_2
     auto &gl = GLContext::currentContext();
-    if (gl.v4_2)
-        gl.v4_2->glMemoryBarrier(GL_ALL_BARRIER_BITS);
-#endif
+    gl.glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
     if (auto errorMessage = getFirstGLError(); !errorMessage.isEmpty())
-        messages += MessageList::insert(mCall.id, MessageType::CallFailed,
+        messages.insert(mCall.id, MessageType::CallFailed,
             errorMessage);
 }
 
@@ -336,23 +249,28 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
 {
     const auto first = scriptEngine.evaluateUInt(mCall.first, mCall.id);
     const auto maxElementCount = getMaxElementCount(scriptEngine);
-    const auto count = (!mCall.count.isEmpty()
+    const auto count = (mKind.indirect || mKind.mesh ? 1
+            : !mCall.count.isEmpty()
             ? scriptEngine.evaluateUInt(mCall.count, mCall.id)
             : std::max(maxElementCount - static_cast<int>(first), 0));
-    const auto instanceCount = scriptEngine.evaluateUInt(mCall.instanceCount, mCall.id);
-    const auto baseVertex = scriptEngine.evaluateUInt(mCall.baseVertex, mCall.id);
-    const auto baseInstance = scriptEngine.evaluateUInt(mCall.baseInstance, mCall.id);
+    const auto instanceCount =
+        scriptEngine.evaluateUInt(mCall.instanceCount, mCall.id);
+    const auto baseVertex =
+        scriptEngine.evaluateUInt(mCall.baseVertex, mCall.id);
+    const auto baseInstance =
+        scriptEngine.evaluateUInt(mCall.baseInstance, mCall.id);
     const auto drawCount = scriptEngine.evaluateUInt(mCall.drawCount, mCall.id);
     const auto indexType = getIndexType();
-    const auto indirectOffset =
-        (mKind.indirect ? scriptEngine.evaluateUInt(mIndirectOffset, mCall.id) : 0);
+    const auto indirectOffset = (mKind.indirect
+            ? scriptEngine.evaluateUInt(mIndirectOffset, mCall.id)
+            : 0);
 
     if (!count)
         return;
 
     if (maxElementCount >= 0
         && first + count > static_cast<uint32_t>(maxElementCount)) {
-        mMessages += MessageList::insert(mCall.id, MessageType::CountExceeded,
+        mMessages.insert(mCall.id, MessageType::CountExceeded,
             first ? QStringLiteral("%1 + %2 > %3")
                         .arg(first)
                         .arg(count)
@@ -364,6 +282,8 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
     if (!bindVertexStream())
         return;
 
+    selectSubroutines();
+
     mTarget->bind();
 
     if (mIndexBuffer)
@@ -374,29 +294,29 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
 
     auto &gl = GLContext::currentContext();
 
-    if (mCall.primitiveType == Call::PrimitiveType::Patches && gl.v4_0)
-        gl.v4_0->glPatchParameteri(GL_PATCH_VERTICES,
+    if (mCall.primitiveType == Call::PrimitiveType::Patches)
+        gl.glPatchParameteri(GL_PATCH_VERTICES,
             scriptEngine.evaluateInt(mCall.patchVertices, mCall.id));
 
-    auto guard = beginTimerQuery();
     if (mCall.callType == Call::CallType::Draw) {
         // DrawArrays(InstancedBaseInstance)
         if (!baseInstance) {
             gl.glDrawArraysInstanced(mCall.primitiveType, first, count,
                 instanceCount);
-        } else if (auto gl42 = check(gl.v4_2, mCall.id, messages)) {
-            gl42->glDrawArraysInstancedBaseInstance(mCall.primitiveType, first,
+        } else {
+            gl.glDrawArraysInstancedBaseInstance(mCall.primitiveType, first,
                 count, instanceCount, static_cast<GLuint>(baseInstance));
         }
     } else if (mCall.callType == Call::CallType::DrawIndexed && indexType) {
         // DrawElements(InstancedBaseVertexBaseInstance)
         const auto offset = reinterpret_cast<void *>(static_cast<intptr_t>(
-            scriptEngine.evaluateUInt(mIndicesOffset, mCall.id) + first * mIndexSize));
+            scriptEngine.evaluateUInt(mIndicesOffset, mCall.id)
+            + first * mIndexSize));
         if (!baseVertex && !baseInstance) {
             gl.glDrawElementsInstanced(mCall.primitiveType, count, indexType,
                 offset, instanceCount);
-        } else if (auto gl42 = check(gl.v4_2, mCall.id, messages)) {
-            gl42->glDrawElementsInstancedBaseVertexBaseInstance(
+        } else {
+            gl.glDrawElementsInstancedBaseVertexBaseInstance(
                 mCall.primitiveType, count, indexType, offset, instanceCount,
                 baseVertex, static_cast<GLuint>(baseInstance));
         }
@@ -405,11 +325,10 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
         const auto offset =
             reinterpret_cast<void *>(static_cast<intptr_t>(indirectOffset));
         if (drawCount == 1) {
-            if (auto gl40 = check(gl.v4_0, mCall.id, messages))
-                gl40->glDrawArraysIndirect(mCall.primitiveType, offset);
-        } else if (auto gl43 = check(gl.v4_3, mCall.id, messages)) {
-            gl43->glMultiDrawArraysIndirect(mCall.primitiveType, offset,
-                drawCount, mIndirectStride);
+            gl.glDrawArraysIndirect(mCall.primitiveType, offset);
+        } else {
+            gl.glMultiDrawArraysIndirect(mCall.primitiveType, offset, drawCount,
+                mIndirectStride);
         }
     } else if (mCall.callType == Call::CallType::DrawIndexedIndirect
         && indexType) {
@@ -417,11 +336,9 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
         const auto offset =
             reinterpret_cast<void *>(static_cast<intptr_t>(indirectOffset));
         if (drawCount == 1) {
-            if (auto gl40 = check(gl.v4_0, mCall.id, messages))
-                gl40->glDrawElementsIndirect(mCall.primitiveType, indexType,
-                    offset);
-        } else if (auto gl43 = check(gl.v4_3, mCall.id, messages)) {
-            gl43->glMultiDrawElementsIndirect(mCall.primitiveType, indexType,
+            gl.glDrawElementsIndirect(mCall.primitiveType, indexType, offset);
+        } else {
+            gl.glMultiDrawElementsIndirect(mCall.primitiveType, indexType,
                 offset, drawCount, mIndirectStride);
         }
     } else if (mCall.callType == Call::CallType::DrawMeshTasks) {
@@ -429,9 +346,10 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
             reinterpret_cast<PFNGLDRAWMESHTASKSNVPROC>(
                 gl.getProcAddress("glDrawMeshTasksNV"));
         if (glDrawMeshTasksNV) {
-            glDrawMeshTasksNV(0, scriptEngine.evaluateUInt(mCall.workGroupsX, mCall.id));
+            glDrawMeshTasksNV(0,
+                scriptEngine.evaluateUInt(mCall.workGroupsX, mCall.id));
         } else {
-            messages += MessageList::insert(mCall.id,
+            messages.insert(mCall.id,
                 MessageType::UnsupportedShaderType);
         }
     } else if (mCall.callType == Call::CallType::DrawMeshTasksIndirect) {
@@ -447,7 +365,7 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
         } else if (drawCount != 1 && glMultiDrawMeshTasksIndirectNV) {
             glMultiDrawMeshTasksIndirectNV(offset, drawCount, mIndirectStride);
         } else {
-            messages += MessageList::insert(mCall.id,
+            messages.insert(mCall.id,
                 MessageType::UnsupportedShaderType);
         }
     }
@@ -463,35 +381,29 @@ void GLCall::executeDraw(MessagePtrSet &messages, ScriptEngine &scriptEngine)
 
 void GLCall::executeCompute(MessagePtrSet &messages, ScriptEngine &scriptEngine)
 {
-#if GL_VERSION_4_3
     if (mIndirectBuffer)
         mIndirectBuffer->bindReadOnly(GL_DISPATCH_INDIRECT_BUFFER);
 
     auto &gl = GLContext::currentContext();
-    auto guard = beginTimerQuery();
-    if (auto gl43 = check(gl.v4_3, mCall.id, messages)) {
-        if (mCall.callType == Call::CallType::Compute) {
-            gl43->glDispatchCompute(
-                scriptEngine.evaluateInt(mCall.workGroupsX, mCall.id),
-                scriptEngine.evaluateInt(mCall.workGroupsY, mCall.id),
-                scriptEngine.evaluateInt(mCall.workGroupsZ, mCall.id));
-        } else if (mCall.callType == Call::CallType::ComputeIndirect) {
-            const auto offset = static_cast<GLintptr>(
-                scriptEngine.evaluateInt(mIndirectOffset, mCall.id));
-            gl43->glDispatchComputeIndirect(offset);
-        }
+    if (mCall.callType == Call::CallType::Compute) {
+        gl.glDispatchCompute(
+            scriptEngine.evaluateInt(mCall.workGroupsX, mCall.id),
+            scriptEngine.evaluateInt(mCall.workGroupsY, mCall.id),
+            scriptEngine.evaluateInt(mCall.workGroupsZ, mCall.id));
+    } else if (mCall.callType == Call::CallType::ComputeIndirect) {
+        const auto offset = static_cast<GLintptr>(
+            scriptEngine.evaluateInt(mIndirectOffset, mCall.id));
+        gl.glDispatchComputeIndirect(offset);
     }
 
     if (mIndirectBuffer)
         mIndirectBuffer->unbind(GL_DISPATCH_INDIRECT_BUFFER);
-#endif // GL_VERSION_4_3
 }
 
 void GLCall::executeClearTexture(MessagePtrSet &messages)
 {
     if (!mTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
 
@@ -511,10 +423,8 @@ void GLCall::executeClearTexture(MessagePtrSet &messages)
         color[2] = srgbToLinear(color[2]);
     }
 
-    auto guard = beginTimerQuery();
     if (!mTexture->clear(color, mCall.clearDepth, mCall.clearStencil))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::ClearingTextureFailed);
+        messages.insert(mCall.id, MessageType::ClearingTextureFailed);
 
     mUsedItems += mTexture->usedItems();
 }
@@ -522,14 +432,11 @@ void GLCall::executeClearTexture(MessagePtrSet &messages)
 void GLCall::executeCopyTexture(MessagePtrSet &messages)
 {
     if (!mTexture || !mFromTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
-    auto guard = beginTimerQuery();
     if (!mTexture->copy(*mFromTexture))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::CopyingTextureFailed);
+        messages.insert(mCall.id, MessageType::CopyingTextureFailed);
 
     mUsedItems += mTexture->usedItems();
     mUsedItems += mFromTexture->usedItems();
@@ -538,11 +445,9 @@ void GLCall::executeCopyTexture(MessagePtrSet &messages)
 void GLCall::executeClearBuffer(MessagePtrSet &messages)
 {
     if (!mBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
-    auto guard = beginTimerQuery();
     mBuffer->clear();
     mUsedItems += mBuffer->usedItems();
 }
@@ -550,11 +455,9 @@ void GLCall::executeClearBuffer(MessagePtrSet &messages)
 void GLCall::executeCopyBuffer(MessagePtrSet &messages)
 {
     if (!mBuffer || !mFromBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
-    auto guard = beginTimerQuery();
     mBuffer->copy(*mFromBuffer);
     mUsedItems += mBuffer->usedItems();
     mUsedItems += mFromBuffer->usedItems();
@@ -563,25 +466,27 @@ void GLCall::executeCopyBuffer(MessagePtrSet &messages)
 void GLCall::executeSwapTextures(MessagePtrSet &messages)
 {
     if (!mTexture || !mFromTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
     if (!mTexture->swap(*mFromTexture))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::SwappingTexturesFailed);
+        messages.insert(mCall.id, MessageType::SwappingTexturesFailed);
+
+    mUsedItems += mTexture->itemId();
+    mUsedItems += mFromTexture->itemId();
 }
 
 void GLCall::executeSwapBuffers(MessagePtrSet &messages)
 {
     if (!mBuffer || !mFromBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
     if (!mBuffer->swap(*mFromBuffer))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::SwappingBuffersFailed);
+        messages.insert(mCall.id, MessageType::SwappingBuffersFailed);
+
+    mUsedItems += mBuffer->itemId();
+    mUsedItems += mFromBuffer->itemId();
 }
 
 bool GLCall::validateShaderTypes()
@@ -590,94 +495,190 @@ bool GLCall::validateShaderTypes()
         return false;
     for (const auto &shader : mProgram->shaders())
         if (!callTypeSupportsShaderType(mCall.callType, shader.type())) {
-            mMessages += MessageList::insert(mCall.id,
+            mMessages.insert(mCall.id,
                 MessageType::InvalidShaderTypeForCall);
             return false;
         }
     return true;
 }
 
-bool GLCall::applyBindings(const GLBindings &bindings,
-    ScriptEngine &scriptEngine)
+bool GLCall::updateBindings(ScriptEngine &scriptEngine)
 {
     if (!mProgram)
         return false;
-    const auto &interface = mProgram->interface();
+
+    const auto &reflection = mProgram->reflection();
 
     auto canRender = true;
-    for (const auto &[name, bindingPoint] : interface.bufferBindingPoints) {
+    for (const auto &desc : reflection.descriptorBindings()) {
+        if (!desc.accessed)
+            continue;
 
-        if (auto bufferBinding = find(bindings.buffers, name)) {
-            if (!applyBufferBinding(bindingPoint, *bufferBinding, scriptEngine))
-                canRender = false;
-            mUsedItems += bufferBinding->bindingItemId;
+        auto arrayElement = uint32_t{};
+        forEachArrayElementRec(desc, 0, arrayElement,
+            [&](const SpvReflectDescriptorBinding &desc, uint32_t arrayElement,
+                bool *variableLengthArrayDone) {
+                const auto message = applyBinding(desc, arrayElement,
+                    (variableLengthArrayDone ? true : false), scriptEngine);
 
-        } else if (!applyDynamicBufferBindings(name, bindingPoint,
-                       bindings.uniforms, scriptEngine)) {
-            mMessages +=
-                MessageList::insert(mCall.id, MessageType::BufferNotSet, name);
-            canRender = false;
-        }
+                const auto failed = (message != MessageType::None);
+                if (variableLengthArrayDone && failed) {
+                    *variableLengthArrayDone = true;
+                    if (message == MessageType::SamplerNotSet
+                        || message == MessageType::BufferNotSet)
+                        return;
+                }
+
+                if (failed) {
+                    auto name = desc.name;
+                    if (isBufferBinding(desc.descriptor_type))
+                        name = desc.type_description->type_name;
+                    mMessages.insert(mItemId, message, name);
+                    canRender = false;
+                }
+            });
     }
 
-    for (const auto &[name, uniform] : interface.uniforms) {
-        if (isImageUniform(uniform)) {
-            if (auto imageBinding = find(bindings.images, name)) {
-                mUsedItems += imageBinding->bindingItemId;
-                if (!applyImageBinding(uniform, *imageBinding))
-                    canRender = false;
-            } else {
-                mMessages += MessageList::insert(mCall.id,
-                    MessageType::ImageNotSet, name);
-                canRender = false;
-            }
-        } else if (isSamplerUniform(uniform)) {
-            if (auto samplerBinding = find(bindings.samplers, name)) {
-                mUsedItems += samplerBinding->bindingItemId;
-                if (!applySamplerBinding(uniform, *samplerBinding))
-                    canRender = false;
-            } else {
-                mMessages += MessageList::insert(mCall.id,
-                    MessageType::SamplerNotSet, name);
-            }
-        } else if (isSamplerOnlyUniform(uniform)) {
-            mMessages += MessageList::insert(mCall.id,
-                MessageType::OpenGLRequiresCombinedTextureSamplers);
-            canRender = false;
-        } else {
-            if (!applyUniformBindings(name, uniform, bindings.uniforms,
-                    scriptEngine))
-                mMessages += MessageList::insert(mCall.id,
-                    MessageType::UniformNotSet, getBaseName(name).toString());
-        }
-    }
+    for (const auto &uniform : mProgram->uniforms())
+        applyUniformBindings(uniform, scriptEngine);
 
-    for (const auto &[stage, subroutines] : interface.stageSubroutines)
-        selectSubroutines(stage, subroutines, bindings.subroutines);
+    selectSubroutines();
 
     return canRender;
 }
 
-bool GLCall::applyUniformBindings(const QString &name,
-    const GLProgram::Interface::Uniform &uniform,
-    const std::map<QString, GLUniformBinding> &bindings,
+MessageType GLCall::applyBinding(const SpvReflectDescriptorBinding &desc,
+    uint32_t arrayElement, bool isVariableLengthArray,
     ScriptEngine &scriptEngine)
 {
-    if (const auto binding = find(bindings, name)) {
-        applyUniformBinding(uniform, *binding, -1, uniform.size, scriptEngine);
+    switch (desc.descriptor_type) {
+    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        if (const auto bufferBinding =
+                find(mBindings.buffers, desc.type_description->type_name)) {
+            if (!bufferBinding->buffer)
+                return MessageType::BufferNotSet;
+            auto &buffer = static_cast<GLBuffer &>(*bufferBinding->buffer);
+            mUsedItems += bufferBinding->bindingItemId;
+            mUsedItems += bufferBinding->blockItemId;
+            mUsedItems += buffer.usedItems();
+
+            const auto [offset, size] =
+                getBufferBindingOffsetSize(*bufferBinding, scriptEngine);
+
+            const auto [target, bindingPoint] =
+                mProgram->getDescriptorBindingPoint(desc, arrayElement);
+            buffer.bindIndexedRange(target, bindingPoint, offset, size, true);
+        } else {
+            auto &buffer = mProgram->getDynamicUniformBuffer(
+                desc.type_description->type_name, desc.block.size);
+
+            Q_ASSERT(desc.block.size == static_cast<uint32_t>(buffer.size()));
+            if (desc.block.size != static_cast<uint32_t>(buffer.size()))
+                return MessageType::BufferNotSet;
+
+            auto bufferData = std::span<std::byte>(
+                reinterpret_cast<std::byte *>(buffer.writableData().data()),
+                buffer.size());
+            if (!applyBufferMemberBindings(bufferData, desc.block, arrayElement,
+                    scriptEngine))
+                return MessageType::BufferNotSet;
+
+            const auto [target, bindingPoint] =
+                mProgram->getDescriptorBindingPoint(desc);
+            buffer.bindIndexedRange(target, bindingPoint, 0, buffer.size(),
+                true);
+        }
+        break;
+
+    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER: {
+        const auto &name = desc.type_description->type_name;
+        auto buffer = std::add_pointer_t<GLBuffer>();
+        auto offset = uint32_t{};
+        auto size = uint32_t{};
+        if (name == PrintfBase::bufferBindingName()) {
+            auto &gl = GLContext::currentContext();
+            buffer = &mProgram->printf().getInitializedBuffer(gl);
+        } else if (const auto bufferBinding = find(mBindings.buffers, name)) {
+            buffer = static_cast<GLBuffer *>(bufferBinding->buffer);
+            std::tie(offset, size) =
+                getBufferBindingOffsetSize(*bufferBinding, scriptEngine);
+            mUsedItems += bufferBinding->bindingItemId;
+            mUsedItems += buffer->usedItems();
+        }
+        if (!buffer)
+            return MessageType::BufferNotSet;
+
+        const auto readonly =
+            (desc.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+
+        const auto [target, bindingPoint] =
+            mProgram->getDescriptorBindingPoint(desc, arrayElement);
+        buffer->bindIndexedRange(target, bindingPoint, offset, size, readonly);
+    } break;
+
+    case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
+        return MessageType::OpenGLRequiresCombinedTextureSamplers;
+
+    case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+    case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+        const auto samplerBinding = find(mBindings.samplers, desc.name);
+        if (!samplerBinding)
+            return MessageType::SamplerNotSet;
+        mUsedItems += samplerBinding->bindingItemId;
+
+        if (!samplerBinding->texture)
+            return MessageType::TextureNotAssigned;
+        mUsedItems += samplerBinding->texture->itemId();
+
+        if (!applySamplerBinding(desc, *samplerBinding))
+            return MessageType::TextureNotAssigned;
+        break;
+    }
+
+    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
+        const auto imageBinding = find(mBindings.images, desc.name);
+        if (!imageBinding)
+            return MessageType::ImageNotSet;
+        mUsedItems += imageBinding->bindingItemId;
+
+        if (!imageBinding->texture)
+            return MessageType::TextureNotAssigned;
+        mUsedItems += imageBinding->texture->itemId();
+
+        if (!applyImageBinding(desc, *imageBinding))
+            return MessageType::TextureNotAssigned;
+        break;
+    }
+
+    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+        return MessageType::NotImplemented;
+
+    default:
+        Q_ASSERT(!"descriptor type not handled");
+        return MessageType::NotImplemented;
+    }
+    return MessageType::None;
+}
+
+void GLCall::applyUniformBindings(const GLProgram::Uniform &uniform,
+    ScriptEngine &scriptEngine)
+{
+    if (const auto binding = find(mBindings.uniforms, uniform.name)) {
+        applyUniformBinding(uniform, *binding, -1, uniform.arraySize,
+            scriptEngine);
         mUsedItems += binding->bindingItemId;
-        return true;
+        return;
     }
 
     // compare array uniforms also by basename
     auto bindingSet = false;
-    const auto baseName = getBaseName(name);
-    const auto uniformIndices = getArrayIndices(name);
-    for (const auto &[bindingName, binding] : bindings)
+    const auto baseName = getBaseName(uniform.name).toString();
+    const auto uniformIndices = getArrayIndices(uniform.name);
+    for (const auto &[bindingName, binding] : mBindings.uniforms)
         if (getBaseName(bindingName) == baseName) {
             const auto bindingIndices = getArrayIndices(bindingName);
             const auto [offset, count] = getValuesOffsetCount(uniformIndices,
-                bindingIndices, uniform.size);
+                bindingIndices, uniform.arraySize);
             if (count) {
                 applyUniformBinding(uniform, binding, offset, count,
                     scriptEngine);
@@ -686,11 +687,12 @@ bool GLCall::applyUniformBindings(const QString &name,
             bindingSet = true;
         }
 
-    return bindingSet;
+    if (!bindingSet)
+        mMessages.insert(mCall.id, MessageType::UniformNotSet, baseName);
 }
 
-void GLCall::applyUniformBinding(const GLProgram::Interface::Uniform &uniform,
-    const GLUniformBinding &binding, int offset, int count,
+void GLCall::applyUniformBinding(const GLProgram::Uniform &uniform,
+    const UniformBinding &binding, int offset, int count,
     ScriptEngine &scriptEngine)
 {
     auto &gl = GLContext::currentContext();
@@ -698,7 +700,7 @@ void GLCall::applyUniformBinding(const GLProgram::Interface::Uniform &uniform,
     switch (uniform.dataType) {
 #define ADD(TYPE, DATATYPE, COUNT, FUNCTION)                                  \
     case TYPE:                                                                \
-        FUNCTION(uniform.location, uniform.size,                              \
+        FUNCTION(uniform.location, uniform.arraySize,                         \
             getValues<DATATYPE>(scriptEngine, binding.values, COUNT * offset, \
                 COUNT * count, itemId)                                        \
                 .data());                                                     \
@@ -706,7 +708,7 @@ void GLCall::applyUniformBinding(const GLProgram::Interface::Uniform &uniform,
 
 #define ADD_MATRIX(TYPE, DATATYPE, COUNT, FUNCTION)                           \
     case TYPE:                                                                \
-        FUNCTION(uniform.location, uniform.size, binding.transpose,           \
+        FUNCTION(uniform.location, uniform.arraySize, binding.transpose,      \
             getValues<DATATYPE>(scriptEngine, binding.values, COUNT * offset, \
                 COUNT * count, itemId)                                        \
                 .data());                                                     \
@@ -716,10 +718,10 @@ void GLCall::applyUniformBinding(const GLProgram::Interface::Uniform &uniform,
         ADD(GL_FLOAT_VEC2, GLfloat, 2, gl.glUniform2fv);
         ADD(GL_FLOAT_VEC3, GLfloat, 3, gl.glUniform3fv);
         ADD(GL_FLOAT_VEC4, GLfloat, 4, gl.glUniform4fv);
-        ADD(GL_DOUBLE, GLdouble, 1, gl.v4_0->glUniform1dv);
-        ADD(GL_DOUBLE_VEC2, GLdouble, 2, gl.v4_0->glUniform2dv);
-        ADD(GL_DOUBLE_VEC3, GLdouble, 3, gl.v4_0->glUniform3dv);
-        ADD(GL_DOUBLE_VEC4, GLdouble, 4, gl.v4_0->glUniform4dv);
+        ADD(GL_DOUBLE, GLdouble, 1, gl.glUniform1dv);
+        ADD(GL_DOUBLE_VEC2, GLdouble, 2, gl.glUniform2dv);
+        ADD(GL_DOUBLE_VEC3, GLdouble, 3, gl.glUniform3dv);
+        ADD(GL_DOUBLE_VEC4, GLdouble, 4, gl.glUniform4dv);
         ADD(GL_INT, GLint, 1, gl.glUniform1iv);
         ADD(GL_INT_VEC2, GLint, 2, gl.glUniform2iv);
         ADD(GL_INT_VEC3, GLint, 3, gl.glUniform3iv);
@@ -741,50 +743,39 @@ void GLCall::applyUniformBinding(const GLProgram::Interface::Uniform &uniform,
         ADD_MATRIX(GL_FLOAT_MAT4x2, GLfloat, 8, gl.glUniformMatrix4x2fv);
         ADD_MATRIX(GL_FLOAT_MAT3x4, GLfloat, 12, gl.glUniformMatrix3x4fv);
         ADD_MATRIX(GL_FLOAT_MAT4x3, GLfloat, 12, gl.glUniformMatrix4x3fv);
-        ADD_MATRIX(GL_DOUBLE_MAT2, GLdouble, 4, gl.v4_0->glUniformMatrix2dv);
-        ADD_MATRIX(GL_DOUBLE_MAT3, GLdouble, 9, gl.v4_0->glUniformMatrix3dv);
-        ADD_MATRIX(GL_DOUBLE_MAT4, GLdouble, 16, gl.v4_0->glUniformMatrix4dv);
-        ADD_MATRIX(GL_DOUBLE_MAT2x3, GLdouble, 6,
-            gl.v4_0->glUniformMatrix2x3dv);
-        ADD_MATRIX(GL_DOUBLE_MAT3x2, GLdouble, 6,
-            gl.v4_0->glUniformMatrix3x2dv);
-        ADD_MATRIX(GL_DOUBLE_MAT2x4, GLdouble, 8,
-            gl.v4_0->glUniformMatrix2x4dv);
-        ADD_MATRIX(GL_DOUBLE_MAT4x2, GLdouble, 8,
-            gl.v4_0->glUniformMatrix4x2dv);
-        ADD_MATRIX(GL_DOUBLE_MAT3x4, GLdouble, 12,
-            gl.v4_0->glUniformMatrix3x4dv);
-        ADD_MATRIX(GL_DOUBLE_MAT4x3, GLdouble, 12,
-            gl.v4_0->glUniformMatrix4x3dv);
+        ADD_MATRIX(GL_DOUBLE_MAT2, GLdouble, 4, gl.glUniformMatrix2dv);
+        ADD_MATRIX(GL_DOUBLE_MAT3, GLdouble, 9, gl.glUniformMatrix3dv);
+        ADD_MATRIX(GL_DOUBLE_MAT4, GLdouble, 16, gl.glUniformMatrix4dv);
+        ADD_MATRIX(GL_DOUBLE_MAT2x3, GLdouble, 6, gl.glUniformMatrix2x3dv);
+        ADD_MATRIX(GL_DOUBLE_MAT3x2, GLdouble, 6, gl.glUniformMatrix3x2dv);
+        ADD_MATRIX(GL_DOUBLE_MAT2x4, GLdouble, 8, gl.glUniformMatrix2x4dv);
+        ADD_MATRIX(GL_DOUBLE_MAT4x2, GLdouble, 8, gl.glUniformMatrix4x2dv);
+        ADD_MATRIX(GL_DOUBLE_MAT3x4, GLdouble, 12, gl.glUniformMatrix3x4dv);
+        ADD_MATRIX(GL_DOUBLE_MAT4x3, GLdouble, 12, gl.glUniformMatrix4x3dv);
 #undef ADD
 #undef ADD_MATRIX
     }
 }
 
-bool GLCall::applySamplerBinding(const GLProgram::Interface::Uniform &uniform,
-    const GLSamplerBinding &binding)
+bool GLCall::applySamplerBinding(const SpvReflectDescriptorBinding &desc,
+    const SamplerBinding &binding)
 {
-    Q_ASSERT(uniform.binding >= 0);
-    if (!binding.texture) {
-        mMessages += MessageList::insert(binding.bindingItemId,
-            MessageType::TextureNotAssigned);
-        return false;
-    }
-    auto &texture = *binding.texture;
-    mUsedItems += texture.itemId();
+    Q_ASSERT(static_cast<GLint>(desc.binding) >= 0);
+    Q_ASSERT(binding.texture);
 
     float borderColor[] = { static_cast<float>(binding.borderColor.redF()),
         static_cast<float>(binding.borderColor.greenF()),
         static_cast<float>(binding.borderColor.blueF()),
         static_cast<float>(binding.borderColor.alphaF()) };
 
+    auto &texture = static_cast<GLTexture &>(*binding.texture);
     const auto target = texture.target();
     auto &gl = GLContext::currentContext();
-    gl.glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + uniform.binding));
-    texture.updateMipmaps();
+    gl.glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + desc.binding));
+    texture.updateMipmaps(gl);
     gl.glBindTexture(target, texture.getReadOnlyTextureId());
-    if (uniform.location >= 0)
-        gl.glUniform1i(uniform.location, uniform.binding);
+    const auto location = mProgram->getDescriptorBindingPoint(desc).index;
+    gl.glUniform1i(location, desc.binding);
 
     switch (target) {
     case QOpenGLTexture::Target1D:
@@ -823,26 +814,14 @@ bool GLCall::applySamplerBinding(const GLProgram::Interface::Uniform &uniform,
     return true;
 }
 
-bool GLCall::applyImageBinding(const GLProgram::Interface::Uniform &uniform,
-    const GLImageBinding &binding)
+bool GLCall::applyImageBinding(const SpvReflectDescriptorBinding &desc,
+    const ImageBinding &binding)
 {
-    Q_ASSERT(uniform.binding >= 0);
+    Q_ASSERT(static_cast<GLint>(desc.binding) >= 0);
+    Q_ASSERT(binding.texture);
+
     auto &gl = GLContext::currentContext();
-    if (!gl.v4_2) {
-        mMessages += MessageList::insert(mCall.id,
-            MessageType::OpenGLVersionNotAvailable, "4.2");
-        return false;
-    }
-
-    if (!binding.texture) {
-        mMessages += MessageList::insert(binding.bindingItemId,
-            MessageType::TextureNotAssigned);
-        return false;
-    }
-    auto &texture = *binding.texture;
-    mUsedItems += texture.itemId();
-
-#if GL_VERSION_4_2
+    auto &texture = static_cast<GLTexture &>(*binding.texture);
     const auto target = texture.target();
     const auto textureId = texture.getReadWriteTextureId();
     const auto format = (binding.format
@@ -850,226 +829,58 @@ bool GLCall::applyImageBinding(const GLProgram::Interface::Uniform &uniform,
             : static_cast<GLenum>(texture.format()));
 
     auto formatSupported = GLint();
-    gl.v4_2->glGetInternalformativ(target, format, GL_SHADER_IMAGE_LOAD, 1,
+    gl.glGetInternalformativ(target, format, GL_SHADER_IMAGE_LOAD, 1,
         &formatSupported);
     if (formatSupported == GL_NONE) {
-        mMessages += MessageList::insert(binding.bindingItemId,
+        mMessages.insert(binding.bindingItemId,
             MessageType::ImageFormatNotBindable);
         return false;
     }
-    gl.v4_2->glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + uniform.binding));
-    gl.v4_2->glBindTexture(target, textureId);
-    if (uniform.location >= 0)
-        gl.v4_2->glUniform1i(uniform.location, uniform.binding);
-    gl.v4_2->glBindImageTexture(static_cast<GLuint>(uniform.binding), textureId,
+    gl.glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + desc.binding));
+    gl.glBindTexture(target, textureId);
+    const auto location = mProgram->getDescriptorBindingPoint(desc).index;
+    gl.glUniform1i(location, desc.binding);
+    gl.glBindImageTexture(static_cast<GLuint>(desc.binding), textureId,
         binding.level, (binding.layer < 0), std::max(binding.layer, 0),
-        binding.access, format);
-#endif
+        GL_READ_WRITE, format);
+
     return true;
 }
 
-bool GLCall::applyBufferBinding(
-    const GLProgram::Interface::BufferBindingPoint &bufferBindingPoint,
-    const GLBufferBinding &binding, ScriptEngine &scriptEngine)
+void GLCall::selectSubroutines()
 {
-    const auto offset =
-        scriptEngine.evaluateInt(binding.offset, mCall.id);
-    const auto rowCount =
-        scriptEngine.evaluateInt(binding.rowCount, mCall.id);
-
-    if (!binding.buffer) {
-        mMessages += MessageList::insert(binding.bindingItemId,
-            MessageType::BufferNotAssigned);
-        return false;
-    }
-
-    auto &buffer = *binding.buffer;
-    mUsedItems += buffer.usedItems();
-    mUsedItems += binding.blockItemId;
-
-    const auto bufferSize =
-        (binding.stride ? rowCount * binding.stride : buffer.size());
-    if (bufferSize < bufferBindingPoint.minimumSize) {
-        mMessages += MessageList::insert(binding.bindingItemId,
-            MessageType::UniformComponentMismatch,
-            QStringLiteral("(%1 bytes < %2 bytes)")
-                .arg(bufferSize)
-                .arg(bufferBindingPoint.minimumSize));
-        return false;
-    }
-    buffer.bindIndexedRange(bufferBindingPoint.target, bufferBindingPoint.index,
-        offset, bufferSize, bufferBindingPoint.readonly);
-    return true;
-}
-
-bool GLCall::applyDynamicBufferBindings(const QString &bufferName,
-    const GLProgram::Interface::BufferBindingPoint &bufferBindingPoint,
-    const std::map<QString, GLUniformBinding> &bindings,
-    ScriptEngine &scriptEngine)
-{
-    auto &buffer = mProgram->getDynamicUniformBuffer(bufferName,
-        bufferBindingPoint.minimumSize);
-
-    auto memberSet = false;
-    for (const auto &[name, member] : bufferBindingPoint.members) {
-        if (applyBufferMemberBindings(buffer, name, member, bindings,
-                scriptEngine)) {
-            memberSet = true;
-        } else {
-            mMessages +=
-                MessageList::insert(mCall.id, MessageType::UniformNotSet, name);
-        }
-    }
-    if (!memberSet && !isGlobalUniformBlockName(bufferName))
-        return false;
-
-    applyBufferBinding(bufferBindingPoint,
-        GLBufferBinding{ .name = bufferName, .buffer = &buffer }, scriptEngine);
-    return true;
-}
-
-bool GLCall::applyBufferMemberBindings(GLBuffer &buffer, const QString &name,
-    const GLProgram::Interface::BufferMember &member,
-    const std::map<QString, GLUniformBinding> &bindings,
-    ScriptEngine &scriptEngine)
-{
-    if (const auto binding = find(bindings, name)) {
-        applyBufferMemberBinding(buffer, member, *binding, -1, member.size,
-            scriptEngine);
-        mUsedItems += binding->bindingItemId;
-        return true;
-    }
-
-    // compare array elements also by basename
-    auto bindingSet = false;
-    const auto baseName = getBaseName(name);
-    const auto uniformIndices = getArrayIndices(name);
-    for (const auto &[bindingName, binding] : bindings)
-        if (getBaseName(bindingName) == baseName) {
-            const auto bindingIndices = getArrayIndices(bindingName);
-            const auto [offset, count] = getValuesOffsetCount(uniformIndices,
-                bindingIndices, member.size);
-            if (count) {
-                applyBufferMemberBinding(buffer, member, binding, offset, count,
-                    scriptEngine);
-                mUsedItems += binding.bindingItemId;
-            }
-            bindingSet = true;
-        }
-
-    return bindingSet;
-}
-
-bool GLCall::applyBufferMemberBinding(GLBuffer &buffer,
-    const GLProgram::Interface::BufferMember &member,
-    const GLUniformBinding &binding, int offset, int count,
-    ScriptEngine &scriptEngine)
-{
-    auto &data = buffer.getWriteableData();
-    const auto itemId = binding.bindingItemId;
-    auto write = [&](const auto &values) {
-        using T = std::decay_t<decltype(values)>::value_type;
-        const auto size = static_cast<qsizetype>(values.size() * sizeof(T));
-        Q_ASSERT(member.offset + size <= data.size());
-        std::memcpy(data.data() + member.offset, values.data(), size);
-    };
-
-    switch (member.dataType) {
-#define ADD(TYPE, DATATYPE, COUNT)                              \
-    case TYPE:                                                  \
-        write(getValues<DATATYPE>(scriptEngine, binding.values, \
-            COUNT * offset, COUNT * count, itemId));            \
-        break
-
-#define ADD_MATRIX(TYPE, DATATYPE, COUNT) ADD(TYPE, DATATYPE, COUNT)
-
-        ADD(GL_FLOAT, GLfloat, 1);
-        ADD(GL_FLOAT_VEC2, GLfloat, 2);
-        ADD(GL_FLOAT_VEC3, GLfloat, 3);
-        ADD(GL_FLOAT_VEC4, GLfloat, 4);
-        ADD(GL_DOUBLE, GLdouble, 1);
-        ADD(GL_DOUBLE_VEC2, GLdouble, 2);
-        ADD(GL_DOUBLE_VEC3, GLdouble, 3);
-        ADD(GL_DOUBLE_VEC4, GLdouble, 4);
-        ADD(GL_INT, GLint, 1);
-        ADD(GL_INT_VEC2, GLint, 2);
-        ADD(GL_INT_VEC3, GLint, 3);
-        ADD(GL_INT_VEC4, GLint, 4);
-        ADD(GL_UNSIGNED_INT, GLuint, 1);
-        ADD(GL_UNSIGNED_INT_VEC2, GLuint, 2);
-        ADD(GL_UNSIGNED_INT_VEC3, GLuint, 3);
-        ADD(GL_UNSIGNED_INT_VEC4, GLuint, 4);
-        ADD(GL_BOOL, GLint, 1);
-        ADD(GL_BOOL_VEC2, GLint, 2);
-        ADD(GL_BOOL_VEC3, GLint, 3);
-        ADD(GL_BOOL_VEC4, GLint, 4);
-        ADD_MATRIX(GL_FLOAT_MAT2, GLfloat, 4);
-        ADD_MATRIX(GL_FLOAT_MAT3, GLfloat, 9);
-        ADD_MATRIX(GL_FLOAT_MAT4, GLfloat, 16);
-        ADD_MATRIX(GL_FLOAT_MAT2x3, GLfloat, 6);
-        ADD_MATRIX(GL_FLOAT_MAT3x2, GLfloat, 6);
-        ADD_MATRIX(GL_FLOAT_MAT2x4, GLfloat, 8);
-        ADD_MATRIX(GL_FLOAT_MAT4x2, GLfloat, 8);
-        ADD_MATRIX(GL_FLOAT_MAT3x4, GLfloat, 12);
-        ADD_MATRIX(GL_FLOAT_MAT4x3, GLfloat, 12);
-        ADD_MATRIX(GL_DOUBLE_MAT2, GLdouble, 4);
-        ADD_MATRIX(GL_DOUBLE_MAT3, GLdouble, 9);
-        ADD_MATRIX(GL_DOUBLE_MAT4, GLdouble, 16);
-        ADD_MATRIX(GL_DOUBLE_MAT2x3, GLdouble, 6);
-        ADD_MATRIX(GL_DOUBLE_MAT3x2, GLdouble, 6);
-        ADD_MATRIX(GL_DOUBLE_MAT2x4, GLdouble, 8);
-        ADD_MATRIX(GL_DOUBLE_MAT4x2, GLdouble, 8);
-        ADD_MATRIX(GL_DOUBLE_MAT3x4, GLdouble, 12);
-        ADD_MATRIX(GL_DOUBLE_MAT4x3, GLdouble, 12);
-#undef ADD
-#undef ADD_MATRIX
-    }
-    return true;
-}
-
-void GLCall::selectSubroutines(Shader::ShaderType stage,
-    const std::vector<GLProgram::Interface::Subroutine> &subroutines,
-    const std::map<QString, GLSubroutineBinding> &bindings)
-{
-    if (subroutines.empty())
-        return;
-
     auto &gl = GLContext::currentContext();
-    if (!gl.v4_0) {
-        mMessages += MessageList::insert(mCall.id,
-            MessageType::OpenGLVersionNotAvailable, "4.0");
-        return;
-    }
+    for (const auto &[stage, subroutines] : mProgram->stageSubroutines()) {
+        auto subroutineIndices = std::vector<GLuint>();
+        for (const auto &subroutine : subroutines) {
+            const auto binding = [&]() -> const SubroutineBinding * {
+                for (const auto &[name, binding] : mBindings.subroutines)
+                    if (name == subroutine.name)
+                        return &binding;
+                return nullptr;
+            }();
 
-    auto subroutineIndices = std::vector<GLuint>();
-    for (const auto &subroutine : subroutines) {
-        const auto binding = [&]() -> const GLSubroutineBinding * {
-            for (const auto &[name, binding] : bindings)
-                if (name == subroutine.name)
-                    return &binding;
-            return nullptr;
-        }();
+            auto index = 0;
+            if (binding) {
+                mUsedItems += binding->bindingItemId;
 
-        auto index = 0;
-        if (binding) {
-            mUsedItems += binding->bindingItemId;
-
-            index = subroutine.subroutines.indexOf(binding->subroutine);
-            if (index < 0) {
-                index = 0;
-                mMessages += MessageList::insert(binding->bindingItemId,
-                    MessageType::InvalidSubroutine, binding->subroutine);
+                index = subroutine.subroutines.indexOf(binding->subroutine);
+                if (index < 0) {
+                    index = 0;
+                    mMessages.insert(binding->bindingItemId,
+                        MessageType::InvalidSubroutine, binding->subroutine);
+                }
+            } else {
+                mMessages.insert(mCall.id,
+                    MessageType::SubroutineNotSet, subroutine.name);
             }
-        } else {
-            mMessages += MessageList::insert(mCall.id,
-                MessageType::SubroutineNotSet, subroutine.name);
+            subroutineIndices.push_back(index);
         }
-        subroutineIndices.push_back(index);
-    }
 
-    gl.v4_0->glUniformSubroutinesuiv(stage,
-        static_cast<GLsizei>(subroutineIndices.size()),
-        subroutineIndices.data());
+        gl.glUniformSubroutinesuiv(stage,
+            static_cast<GLsizei>(subroutineIndices.size()),
+            subroutineIndices.data());
+    }
 }
 
 bool GLCall::bindVertexStream()
@@ -1077,21 +888,27 @@ bool GLCall::bindVertexStream()
     if (mVertexStream)
         mUsedItems += mVertexStream->itemId();
 
-    auto canRender = true;
     auto &gl = GLContext::currentContext();
-    const auto &attributeLocations = mProgram->interface().attributeLocations;
-    for (const auto &[name, location] : attributeLocations) {
+    auto canRender = true;
+    for (const auto *input : mProgram->reflection().inputVariables()) {
+        if (isBuiltIn(*input))
+            continue;
+
+        const auto name = (input->semantic ? input->semantic : input->name);
         const auto *attributePtr =
             (mVertexStream ? mVertexStream->findAttribute(name) : nullptr);
         if (attributePtr)
             mUsedItems += attributePtr->usedItems;
 
         if (!attributePtr || !attributePtr->buffer) {
-            mMessages += MessageList::insert(mCall.id,
+            mMessages.insert(mCall.id,
                 MessageType::AttributeNotSet, name);
             canRender = false;
             continue;
         }
+
+        const auto location = input->location;
+        Q_ASSERT(static_cast<int32_t>(location) >= 0);
 
         const auto &attribute = *attributePtr;
         auto &buffer = *attribute.buffer;
@@ -1122,11 +939,10 @@ bool GLCall::bindVertexStream()
             break;
 
         case GL_DOUBLE:
-            if (gl.v4_2)
-                gl.v4_2->glVertexAttribLPointer(location, attribute.count,
-                    attribute.type, attribute.stride,
-                    reinterpret_cast<void *>(
-                        static_cast<intptr_t>(attribute.offset)));
+            gl.glVertexAttribLPointer(location, attribute.count, attribute.type,
+                attribute.stride,
+                reinterpret_cast<void *>(
+                    static_cast<intptr_t>(attribute.offset)));
             break;
         }
 
@@ -1142,7 +958,7 @@ bool GLCall::bindVertexStream()
 void GLCall::unbindVertexStream()
 {
     auto &gl = GLContext::currentContext();
-    for (const auto &[name, location] :
-        mProgram->interface().attributeLocations)
-        gl.glDisableVertexAttribArray(location);
+    for (const auto *input : mProgram->reflection().inputVariables())
+        if (!isBuiltIn(*input))
+            gl.glDisableVertexAttribArray(input->location);
 }

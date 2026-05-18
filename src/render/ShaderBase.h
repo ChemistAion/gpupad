@@ -1,7 +1,8 @@
 #pragma once
 
-#include "ShaderPrintf.h"
-#include "Spirv.h"
+#include "PrintfBase.h"
+#include "ShaderCompiler.h"
+#include "Reflection.h"
 
 class ShaderBase
 {
@@ -13,26 +14,28 @@ public:
     bool operator==(const ShaderBase &rhs) const;
     ItemId itemId() const { return mItemId; }
     Shader::ShaderType type() const { return mType; }
-    Shader::Language language() const { return mLanguage; }
     const QStringList &sources() const { return mSources; }
     const QStringList &fileNames() const { return mFileNames; }
     const QString &entryPoint() const { return mEntryPoint; }
     MessagePtrSet resetMessages() { return std::exchange(mMessages, {}); }
-    Spirv::Input getSpirvCompilerInput(ShaderPrintf &printf);
-    Spirv compileSpirv(ShaderPrintf &printf);
+    ShaderCompiler::Input getShaderCompilerInput(PrintfBase &printf);
+    virtual bool validate();
+    virtual Reflection getReflection();
+    Spirv compileSpirv();
     QString preprocess();
-    QString generateReadableSpirv();
-    QVariant generateBinarySpirv();
+    QString generateGLSL();
+    QString generateHLSL();
+    QString disassemble();
     QString generateGLSLangAST();
-    QString getJsonInterface();
 
 protected:
     virtual QStringList preprocessorDefinitions() const;
-    QStringList getPatchedSources(ShaderPrintf &printf,
+    Spirv compileSpirv(PrintfBase &printf);
+    QStringList getPatchedSources(PrintfBase &printf,
         QStringList *usedFileNames);
-    QStringList getPatchedSourcesGLSL(ShaderPrintf &printf,
+    QStringList getPatchedSourcesGLSL(PrintfBase &printf,
         QStringList *usedFileNames);
-    QStringList getPatchedSourcesHLSL(ShaderPrintf &printf,
+    QStringList getPatchedSourcesHLSL(PrintfBase &printf,
         QStringList *usedFileNames = nullptr);
 
     ItemId mItemId{};
@@ -42,7 +45,6 @@ protected:
     QString mPreamble;
     QString mIncludePaths;
     Shader::ShaderType mType{};
-    Shader::Language mLanguage{};
     QString mEntryPoint;
     Session mSession{};
 };

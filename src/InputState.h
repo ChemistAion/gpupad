@@ -1,10 +1,12 @@
 #pragma once
 
+#include "Evaluation.h"
 #include <QObject>
 #include <QPoint>
 #include <QSize>
 #include <QVector>
 #include <vector>
+#include <chrono>
 
 enum class ButtonState {
     Up = 0,
@@ -19,14 +21,22 @@ class InputState : public QObject
 public:
     InputState();
 
+    void reset();
+    void restoreEditorSize(QSize size);
+    void restoreMousePosition(const QPoint &position);
+
+    void setFrameIndex(int index);
+    void setTime(double time);
     void setEditorSize(QSize size);
     void setMousePosition(const QPoint &position);
     void setMouseButtonPressed(Qt::MouseButton button);
     void setMouseButtonReleased(Qt::MouseButton button);
     void setKeyPressed(Qt::Key key);
     void setKeyReleased(Qt::Key key);
-    void update();
+    void update(EvaluationType evaluationType);
 
+    int frameIndex() const { return mFrameIndex; }
+    double time() const { return mTime; }
     const QSize &editorSize() const { return mEditorSize; }
     const QPoint &mousePosition() const { return mMousePosition; }
     const QPoint &prevMousePosition() const { return mPrevMousePosition; }
@@ -37,10 +47,13 @@ public:
     const QVector<ButtonState> &keyStates() const { return mKeyStates; }
 
 Q_SIGNALS:
+    void frameIndexChanged(int frameIndex);
+    void timeChanged(double time);
     void mouseChanged();
     void keysChanged();
 
 private:
+    using Clock = std::chrono::system_clock;
     using ButtonStateQueue = std::vector<std::pair<int, ButtonState>>;
 
     QSize mNextEditorSize{};
@@ -48,9 +61,13 @@ private:
     ButtonStateQueue mNextMouseButtonStates;
     ButtonStateQueue mNextKeyStates;
 
+    int mFrameIndex{};
+    double mTime{};
+    double mManualTimeStep{ 1.0 / 60 };
     QSize mEditorSize;
     QPoint mMousePosition;
     QPoint mPrevMousePosition;
     QVector<ButtonState> mMouseButtonStates;
     QVector<ButtonState> mKeyStates;
+    Clock::time_point mLastUpdateTime{};
 };

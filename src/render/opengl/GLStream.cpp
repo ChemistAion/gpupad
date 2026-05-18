@@ -1,18 +1,17 @@
 #include "GLStream.h"
+#include "scripting/ScriptEngine.h"
 
 GLStream::GLStream(const Stream &stream) : mItemId(stream.id)
 {
     auto attributeIndex = 0;
-    for (const auto &item : stream.items) {
+    for (const auto &item : stream.items)
         if (auto attribute = castItem<Attribute>(item))
-            mAttributes[attributeIndex] = GLAttribute{
+            mAttributes[attributeIndex++] = GLAttribute{
                 { item->id },
                 attribute->name,
                 attribute->normalize,
                 attribute->divisor,
             };
-        ++attributeIndex;
-    }
 }
 
 void GLStream::setAttribute(int attributeIndex, const Field &field,
@@ -30,14 +29,16 @@ void GLStream::setAttribute(int attributeIndex, const Field &field,
     attribute.stride = getBlockStride(block);
     attribute.offset = blockOffset + getFieldRowOffset(field);
 
-    const auto rowCount = scriptEngine.evaluateValue(block.rowCount, block.id);
-    if (mMaxElementCount < 0 || rowCount < mMaxElementCount)
-        mMaxElementCount = rowCount;
+    if (attribute.divisor == 0) {
+        const auto rowCount =
+            scriptEngine.evaluateValue(block.rowCount, block.id);
+        if (mMaxElementCount < 0 || rowCount < mMaxElementCount)
+            mMaxElementCount = rowCount;
+    }
 
     if (!validateAttribute(attribute)) {
         attribute.buffer = nullptr;
-        mMessages +=
-            MessageList::insert(field.id, MessageType::InvalidAttribute);
+        mMessages.insert(field.id, MessageType::InvalidAttribute);
     }
 }
 

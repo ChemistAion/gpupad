@@ -43,13 +43,13 @@ SourceType deduceSourceType(SourceType current, const QString &extension,
             return SourceType::GLSL_VertexShader;
         if (source.contains("local_size_x"))
             return SourceType::GLSL_ComputeShader;
-        if (getShaderLanguage(current) != Shader::Language::GLSL)
+        if (getShaderLanguage(current) != Session::ShaderLanguage::GLSL)
             return SourceType::GLSL_FragmentShader;
         return current;
     }
 
     if (extension == "hlsl" || extension == "hlsli" || extension == "fx") {
-        if (getShaderLanguage(current) != Shader::Language::HLSL) {
+        if (getShaderLanguage(current) != Session::ShaderLanguage::HLSL) {
             if (source.contains("PS"))
                 return SourceType::HLSL_PixelShader;
             if (source.contains("VS"))
@@ -67,6 +67,9 @@ SourceType deduceSourceType(SourceType current, const QString &extension,
         return current;
     }
 
+    if (extension == "slang")
+        return SourceType::Slang;
+
     if (extension == "txt" || extension == "log" || extension == "csv")
         return SourceType::PlainText;
 
@@ -76,9 +79,10 @@ SourceType deduceSourceType(SourceType current, const QString &extension,
     return current;
 }
 
-SourceType getSourceType(Shader::ShaderType type, Shader::Language language)
+SourceType getSourceType(Session::ShaderLanguage language,
+    Shader::ShaderType type)
 {
-    using SL = Shader::Language;
+    using SL = Session::ShaderLanguage;
     using ST = Shader::ShaderType;
 
     static const auto sMapping = QMap<std::pair<SL, ST>, SourceType>{
@@ -117,8 +121,14 @@ SourceType getSourceType(Shader::ShaderType type, Shader::Language language)
             SourceType::HLSL_RayClosestHitShader },
         { { SL::HLSL, ST::RayMiss }, SourceType::HLSL_RayMissShader },
         { { SL::HLSL, ST::RayCallable }, SourceType::HLSL_RayCallableShader },
+        { { SL::Slang, ST::Includable }, SourceType::Slang },
     };
     return sMapping[{ language, type }];
+}
+
+SourceType getSourceType(const Shader &shader)
+{
+    return getSourceType(getShaderLanguage(shader), shader.shaderType);
 }
 
 Shader::ShaderType getShaderType(SourceType sourceType)
@@ -128,7 +138,8 @@ Shader::ShaderType getShaderType(SourceType sourceType)
     switch (sourceType) {
     case SourceType::PlainText:
     case SourceType::Generic:
-    case SourceType::JavaScript:                 break;
+    case SourceType::JavaScript:
+    case SourceType::Slang:                      break;
     case SourceType::GLSL_VertexShader:
     case SourceType::HLSL_VertexShader:          return ST::Vertex;
     case SourceType::GLSL_FragmentShader:
@@ -161,7 +172,7 @@ Shader::ShaderType getShaderType(SourceType sourceType)
     return {};
 }
 
-Shader::Language getShaderLanguage(SourceType sourceType)
+Session::ShaderLanguage getShaderLanguage(SourceType sourceType)
 {
     switch (sourceType) {
     case SourceType::PlainText:
@@ -181,7 +192,8 @@ Shader::Language getShaderLanguage(SourceType sourceType)
     case SourceType::GLSL_RayAnyHitShader:
     case SourceType::GLSL_RayClosestHitShader:
     case SourceType::GLSL_RayMissShader:
-    case SourceType::GLSL_RayCallableShader:     return Shader::Language::GLSL;
+    case SourceType::GLSL_RayCallableShader:
+        return Session::ShaderLanguage::GLSL;
 
     case SourceType::HLSL_VertexShader:
     case SourceType::HLSL_PixelShader:
@@ -196,7 +208,19 @@ Shader::Language getShaderLanguage(SourceType sourceType)
     case SourceType::HLSL_RayAnyHitShader:
     case SourceType::HLSL_RayClosestHitShader:
     case SourceType::HLSL_RayMissShader:
-    case SourceType::HLSL_RayCallableShader:     return Shader::Language::HLSL;
+    case SourceType::HLSL_RayCallableShader:
+        return Session::ShaderLanguage::HLSL;
+
+    case SourceType::Slang: return Session::ShaderLanguage::Slang;
     }
-    return Shader::Language::None;
+    return Session::ShaderLanguage::None;
+}
+
+Session::ShaderLanguage getShaderLanguage(const Shader &shader)
+{
+    for (auto parent = shader.parent; parent; parent = parent->parent)
+        if (auto session = castItem<Session>(parent))
+            return session->shaderLanguage;
+
+    return {};
 }

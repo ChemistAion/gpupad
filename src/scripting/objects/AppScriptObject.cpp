@@ -1,74 +1,68 @@
 
 #include "AppScriptObject.h"
-#include "SessionScriptObject.h"
 #include "KeyboardScriptObject.h"
 #include "EditorScriptObject.h"
 #include "MouseScriptObject.h"
 #include "LibraryScriptObject.h"
 #include "../ScriptEngine.h"
+#include "../ScriptTimeout.h"
 #include "../CustomActions.h"
+#include "SynchronizeLogic.h"
 #include "Singletons.h"
 #include "FileCache.h"
+#include "Settings.h"
 #include "editors/EditorManager.h"
 #include "editors/qml/QmlView.h"
 #include <QApplication>
 #include <QDirIterator>
-#include <QJSEngine>
-#include <QCoreApplication>
 #include <atomic>
 
-bool AppScriptObject_MainThreadCalls::openQmlView(QString fileName,
-    QString title, ScriptEnginePtr enginePtr)
-{
-    const auto editor =
-        Singletons::editorManager().openQmlView(fileName, enginePtr);
-    if (!editor)
-        return false;
-
-    // set cleaned up title
-    title = title.remove("&").replace("...", "");
-    if (!title.isEmpty())
-        editor->setWindowTitle(title);
-
-    return true;
-}
-
-bool AppScriptObject_MainThreadCalls::openEditor(QString fileName)
-{
-    return static_cast<bool>(Singletons::editorManager().openEditor(fileName));
-}
-
-QString AppScriptObject_MainThreadCalls::openFileDialog(QString pattern)
-{
-    auto options = FileDialog::Options{};
-    Singletons::fileDialog().setDirectory(mLastFileDialogDirectory);
-
-    if (!Singletons::fileDialog().exec(options, pattern))
-        return {};
-    mLastFileDialogDirectory = Singletons::fileDialog().directory();
-    return Singletons::fileDialog().fileName();
-}
-
-//-------------------------------------------------------------------------
-
 AppScriptObject::AppScriptObject(const ScriptEnginePtr &enginePtr,
-    const QString &basePath)
+    const QDir &basePath)
     : QObject(static_cast<QObject *>(enginePtr.get()))
     , mEnginePtr(enginePtr)
     , mJsEngine(&enginePtr->jsEngine())
     , mBasePath(basePath)
-    , mSessionScriptObject(new SessionScriptObject(this))
     , mMouseScriptObject(new MouseScriptObject(this))
     , mKeyboardScriptObject(new KeyboardScriptObject(this))
 {
-    mSessionScriptObject->initializeEngine(mJsEngine);
-    mSessionProperty = mJsEngine->newQObject(mSessionScriptObject);
+    Q_ASSERT(mBasePath.isAbsolute());
     mMouseProperty = mJsEngine->newQObject(mMouseScriptObject);
     mKeyboardProperty = mJsEngine->newQObject(mKeyboardScriptObject);
+    mDateProperty = mJsEngine->newArray(4);
 
-    mMainThreadCalls = new AppScriptObject_MainThreadCalls();
+    mMainThreadObject = new QObject();
     if (!onMainThread())
-        mMainThreadCalls->moveToThread(QApplication::instance()->thread());
+        mMainThreadObject->moveToThread(QApplication::instance()->thread());
+
+    dispatchToMainThread([&]() {
+        connect(&Singletons::synchronizeLogic(),
+            &SynchronizeLogic::evaluationModeChanged, this,
+            &AppScriptObject::handleEvaluationModeChanged);
+
+        connect(&Singletons::synchronizeLogic(),
+            &SynchronizeLogic::currentEditorChanged, this,
+            &AppScriptObject::currentEditorChanged);
+
+        connect(&Singletons::synchronizeLogic(), &SynchronizeLogic::itemAdded,
+            this, &AppScriptObject::handleItemAdded);
+        connect(&Singletons::synchronizeLogic(),
+            &SynchronizeLogic::itemModified, this,
+            &AppScriptObject::handleItemModified);
+        connect(&Singletons::synchronizeLogic(), &SynchronizeLogic::itemRemoved,
+            this, &AppScriptObject::handleItemRemoved);
+
+        connect(&Singletons::settings(), &Settings::windowThemeChanged, this,
+            &AppScriptObject::paletteChanged);
+
+        auto &inputState = Singletons::inputState();
+        mFrame = inputState.frameIndex();
+        mTime = inputState.time();
+        connect(&inputState, &InputState::frameIndexChanged, this,
+            &AppScriptObject::handleFrameChanged);
+        connect(&inputState, &InputState::timeChanged, this,
+            &AppScriptObject::handleTimeChanged);
+    });
 }
 
 AppScriptObject::~AppScriptObject()
@@ -76,7 +70,34 @@ AppScriptObject::~AppScriptObject()
     for (auto &[editorScriptObject, scriptValue] : mEditorScriptObjects)
         editorScriptObject->resetAppScriptObject();
 
-    mMainThreadCalls->deleteLater();
+    mMainThreadObject->deleteLater();
+}
+
+ScriptEngine &AppScriptObject::engine()
+{
+    auto engine = mEnginePtr.lock();
+    Q_ASSERT(engine);
+    return *engine;
+}
+
+QJSEngine &AppScriptObject::jsEngine()
+{
+    Q_ASSERT(mEnginePtr.lock());
+    return *mJsEngine;
+}
+
+void AppScriptObject::throwJsError(const QString &error) {
+    jsEngine().throwError(error);
+}
+
+bool AppScriptObject::isUntitled(QString fileName)
+{
+    return FileDialog::isUntitled(fileName);
+}
+
+QString AppScriptObject::getFileTitle(QString fileName)
+{
+    return FileDialog::getFileTitle(fileName);
 }
 
 QString AppScriptObject::getAbsolutePath(const QString &fileName) const
@@ -89,13 +110,13 @@ QString AppScriptObject::getAbsolutePath(const QString &fileName) const
 void AppScriptObject::dispatchToMainThread(
     const std::function<void()> &function)
 {
-    if (QThread::currentThread() == mMainThreadCalls->thread()) {
+    if (QThread::currentThread() == mMainThreadObject->thread()) {
         function();
         return;
     }
     auto done = std::atomic<bool>{};
     QMetaObject::invokeMethod(
-        mMainThreadCalls,
+        mMainThreadObject,
         [&]() {
             function();
             done.store(true);
@@ -115,10 +136,7 @@ void AppScriptObject::update()
 {
     Q_ASSERT(onMainThread());
 
-    ++mFrameIndex;
-
     auto &inputState = Singletons::inputState();
-    inputState.update();
     mMouseScriptObject->update(inputState);
     mKeyboardScriptObject->update(inputState);
 
@@ -147,42 +165,129 @@ bool AppScriptObject::usesViewportSize(const QString &fileName) const
     return false;
 }
 
-QJSValue AppScriptObject::session()
+QString AppScriptObject::evaluation() const
 {
-    if (!mSessionScriptObject->available()) {
-        mJsEngine->throwError(QJSValue::EvalError,
-            "Session object not available");
-        return QJSValue();
+    switch (mEvaluationMode) {
+    case EvaluationMode::Paused:    return "Paused";
+    case EvaluationMode::Steady:    return "Steady";
+    case EvaluationMode::Automatic: return "Automatic";
     }
-    return mSessionProperty;
+    return "";
 }
 
-QJSValue AppScriptObject::openEditor(QString fileName, QString title)
+void AppScriptObject::setEvaluation(QString mode)
 {
-    fileName = getAbsolutePath(fileName);
+    dispatchToMainThread([&]() {
+        auto &synchronizeLogic = Singletons::synchronizeLogic();
+        if (mode == "Reset") {
+            synchronizeLogic.resetEvaluation();
+        } else if (mode == "Manual") {
+            synchronizeLogic.manualEvaluation();
+        } else if (mode == "Automatic") {
+            synchronizeLogic.setEvaluationMode(EvaluationMode::Automatic);
+        } else if (mode == "Steady") {
+            synchronizeLogic.setEvaluationMode(EvaluationMode::Steady);
+        } else if (mode == "Paused") {
+            synchronizeLogic.setEvaluationMode(EvaluationMode::Paused);
+        }
+    });
+}
 
+void AppScriptObject::handleEvaluationModeChanged(EvaluationMode evaluationMode)
+{
+    mEvaluationMode = evaluationMode;
+    Q_EMIT evaluationChanged();
+}
+
+void AppScriptObject::setFrame(int frame)
+{
+    dispatchToMainThread(
+        [&]() { Singletons::inputState().setFrameIndex(frame); });
+}
+
+void AppScriptObject::handleFrameChanged(int frame)
+{
+    mFrame = frame;
+    Q_EMIT frameChanged();
+}
+
+void AppScriptObject::setTime(double time)
+{
+    dispatchToMainThread([&]() { Singletons::inputState().setTime(time); });
+}
+
+void AppScriptObject::handleTimeChanged(double time)
+{
+    mTimeDelta = time - mTime;
+    mTime = time;
+    Q_EMIT timeChanged();
+    Q_EMIT timeDeltaChanged();
+}
+
+QJSValue AppScriptObject::date()
+{
+    const auto date = QDate::currentDate();
+    mDateProperty.setProperty(0, date.year());
+    mDateProperty.setProperty(1, date.month());
+    mDateProperty.setProperty(2, date.day());
+    mDateProperty.setProperty(3,
+        QTime::currentTime().msecsSinceStartOfDay() / 1000.0);
+    return mDateProperty;
+}
+
+QVariantMap AppScriptObject::palette() const
+{
+    const auto p = qApp->palette();
+    auto palette = QVariantMap();
+    palette["alternateBase"] = p.color(QPalette::AlternateBase);
+    palette["base"] = p.color(QPalette::Base);
+    palette["text"] = p.color(QPalette::Text);
+    palette["window"] = p.color(QPalette::Window);
+    palette["windowText"] = p.color(QPalette::WindowText);
+    palette["button"] = p.color(QPalette::Button);
+    palette["buttonText"] = p.color(QPalette::ButtonText);
+    return palette;
+}
+
+QJSValue AppScriptObject::currentEditor()
+{
+    auto fileName = QString();
+    dispatchToMainThread([&]() {
+        fileName = Singletons::editorManager().currentEditorFileName();
+    });
+    return getEditorObject(fileName);
+}
+
+QJSValue AppScriptObject::tryGetEditorObject(const QString &fileName)
+{
     const auto it = std::find_if(mEditorScriptObjects.begin(),
         mEditorScriptObjects.end(),
         [&](const auto &kv) { return kv.first->fileName() == fileName; });
     if (it != mEditorScriptObjects.end())
         return it->second;
+    return QJSValue::UndefinedValue;
+}
 
-    auto result = false;
-    dispatchToMainThread([&]() {
-        if (fileName.endsWith(".qml", Qt::CaseInsensitive)) {
-            result = static_cast<bool>(mMainThreadCalls->openQmlView(fileName,
-                title, (onMainThread() ? mEnginePtr.lock() : nullptr)));
-        } else {
-            result = static_cast<bool>(mMainThreadCalls->openEditor(fileName));
-        }
-    });
-    if (!result)
-        return {};
+QJSValue AppScriptObject::getEditorObject(const QString &fileName)
+{
+    if (auto editor = tryGetEditorObject(fileName); !editor.isUndefined())
+        return editor;
 
     auto editorScriptObject = new EditorScriptObject(this, fileName);
+    dispatchToMainThread([&]() { editorScriptObject->update(); });
     return mEditorScriptObjects
         .emplace(editorScriptObject, jsEngine().newQObject(editorScriptObject))
         .first->second;
+}
+
+QJSValue AppScriptObject::saveEditor(QString fileName)
+{
+    auto saved = false;
+    dispatchToMainThread([&]() {
+        if (auto editor = Singletons::editorManager().getEditor(fileName))
+            saved = editor->save();
+    });
+    return saved;
 }
 
 QJSValue AppScriptObject::loadLibrary(QString fileName)
@@ -192,26 +297,18 @@ QJSValue AppScriptObject::loadLibrary(QString fileName)
         return *it;
 
     // search in script's base path and in libs
-    auto searchPaths = QList<QDir>();
-    if (mBasePath != QDir())
-        searchPaths += mBasePath;
-#if !defined(NDEBUG)
-    searchPaths += QDir(
-        QCoreApplication::applicationDirPath() + "/extra/actions/" + fileName);
-#endif
-    for (const auto &dir : getApplicationDirectories("actions"))
-        searchPaths += dir.filePath(fileName);
-    searchPaths += getApplicationDirectories("libs");
+    auto libDirs = QList<QDir>();
+    libDirs += mBasePath;
+    libDirs += getApplicationDirectories(LibrariesDir);
 
-    auto engine = mEnginePtr.lock();
     if (FileDialog::getFileExtension(fileName) == "js") {
-        for (const auto &dir : std::as_const(searchPaths))
+        for (const auto &dir : std::as_const(libDirs))
             if (dir.exists(fileName)) {
                 const auto filePath =
                     toNativeCanonicalFilePath(dir.filePath(fileName));
                 auto source = QString();
                 if (Singletons::fileCache().getSource(filePath, &source)) {
-                    engine->evaluateScript(source, filePath);
+                    engine().evaluateScript(source, filePath);
                     // script does not return anything for now
                     const auto libraryObject = jsEngine().newObject();
                     mLoadedLibraries[fileName] = libraryObject;
@@ -219,53 +316,87 @@ QJSValue AppScriptObject::loadLibrary(QString fileName)
                 }
             }
     } else {
-        auto paths = QStringList();
-        for (const auto &dir : std::as_const(searchPaths))
-            paths += dir.path();
+        // search folders also in actions
+        const auto actionDirs = getApplicationDirectories(ActionsDir);
+        for (const auto &dir : actionDirs)
+            libDirs += dir.filePath(fileName);
+
+        auto searchPaths = QStringList();
+        for (const auto &dir : std::as_const(libDirs))
+            searchPaths += dir.path();
         auto library = std::make_unique<LibraryScriptObject>();
-        if (library->load(&jsEngine(), fileName, paths)) {
+        if (library->load(&jsEngine(), fileName, searchPaths)) {
             const auto libraryObject = jsEngine().newQObject(library.release());
             mLoadedLibraries[fileName] = libraryObject;
             return libraryObject;
         }
     }
-    jsEngine().throwError("Loading library '" + fileName + "' failed");
+    throwJsError("Loading library '" + fileName + "' failed");
     return {};
+}
+
+void AppScriptObject::evaluateScript(QString fileName)
+{
+    auto source = QString();
+    if (!Singletons::fileCache().getSource(getAbsolutePath(fileName), &source))
+        return throwJsError(
+            "Loading file '" + FileDialog::getFileTitle(fileName) + "' failed");
+
+    if (fileName.endsWith(".qml", Qt::CaseInsensitive)) {
+        if (onMainThread())
+            Singletons::editorManager().openQmlView(fileName, mEnginePtr.lock());
+    } else {
+        engine().evaluateScript(source, fileName);
+    }
 }
 
 QJSValue AppScriptObject::callAction(QString id, QJSValue arguments)
 {
-    auto engine = mEnginePtr.lock();
-    engine->setGlobal("arguments", arguments);
+    auto& engine = this->engine();
+    engine.setGlobal("arguments", arguments);
 
     auto &customActions = Singletons::customActions();
-    const auto applied = customActions.applyActionInEngine(id, *engine);
-    engine->setGlobal("arguments", QJSValue::UndefinedValue);
+    const auto applied = customActions.applyActionInEngine(id, engine);
+    engine.setGlobal("arguments", QJSValue::UndefinedValue);
     if (!applied)
-        jsEngine().throwError("Applying action '" + id + "' failed");
+        throwJsError("Applying action '" + id + "' failed");
 
-    const auto result = engine->getGlobal("result");
-    engine->setGlobal("result", QJSValue::UndefinedValue);
+    const auto result = engine.getGlobal("result");
+    engine.setGlobal("result", QJSValue::UndefinedValue);
 
     return result;
 }
 
 QJSValue AppScriptObject::callAction(QString id)
 {
-    return callAction(id, mJsEngine->newObject());
+    return callAction(id, jsEngine().newObject());
 }
 
 QJSValue AppScriptObject::openFileDialog(QString pattern)
 {
+    return openFileDialog(pattern, FileDialog::Options{});
+}
+
+QJSValue AppScriptObject::saveFileDialog(QString pattern)
+{
+    return openFileDialog(pattern, FileDialog::Saving);
+}
+
+QJSValue AppScriptObject::openFileDialog(QString pattern,
+    FileDialog::Options options)
+{
     auto result = QString();
-    dispatchToMainThread(
-        [&]() { result = mMainThreadCalls->openFileDialog(pattern); });
+    dispatchToMainThread([&]() {
+        const auto guard = suspendScriptEngineTimeout();
+        if (Singletons::fileDialog().exec(options, pattern))
+            result = Singletons::fileDialog().fileName();
+    });
     if (!result.isEmpty())
         return result;
     return {};
 }
 
-QJSValue AppScriptObject::enumerateFiles(QString pattern)
+QJSValue AppScriptObject::enumerate(QString pattern, bool directories)
 {
     const auto fileInfo = QFileInfo(getAbsolutePath(pattern));
     auto dir = fileInfo.dir();
@@ -274,7 +405,8 @@ QJSValue AppScriptObject::enumerateFiles(QString pattern)
         dir.cdUp();
         flags |= QDirIterator::Subdirectories;
     }
-    dir.setFilter(QDir::Files);
+    dir.setFilter(directories ? QDir::Dirs | QDir::NoDotAndDotDot
+                              : QDir::Files);
     dir.setNameFilters({ fileInfo.fileName() });
     dir.setSorting(QDir::Name);
     auto it = QDirIterator(dir, flags);
@@ -282,6 +414,16 @@ QJSValue AppScriptObject::enumerateFiles(QString pattern)
     for (auto i = 0; it.hasNext();)
         result.setProperty(i++, it.next());
     return result;
+}
+
+QJSValue AppScriptObject::enumerateFiles(QString pattern)
+{
+    return enumerate(pattern, false);
+}
+
+QJSValue AppScriptObject::enumerateDirs(QString pattern)
+{
+    return enumerate(pattern, true);
 }
 
 QJSValue AppScriptObject::writeTextFile(QString fileName, QString string)
@@ -320,7 +462,7 @@ QJSValue AppScriptObject::writeBinaryFile(QString fileName, QByteArray binary)
 
 QJSValue AppScriptObject::readTextFile(QString fileName)
 {
-    if (FileDialog::isEmptyOrUntitled(fileName))
+    if (fileName.isEmpty())
         return {};
 
     auto source = QString{};

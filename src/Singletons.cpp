@@ -6,6 +6,7 @@
 #include "SynchronizeLogic.h"
 #include "VideoManager.h"
 #include "editors/EditorManager.h"
+#include "render/direct3d/D3DRenderer.h"
 #include "render/opengl/GLRenderer.h"
 #include "render/vulkan/VKRenderer.h"
 #include "session/SessionModel.h"
@@ -23,8 +24,25 @@ bool onMainThread()
 RendererPtr Singletons::sessionRenderer()
 {
     Q_ASSERT(onMainThread());
-    const auto &renderer = sessionModel().sessionItem().renderer;
-    return (renderer == "Vulkan" ? vkRenderer() : glRenderer());
+
+    // reset failed renderers so error message disappears
+    const auto type = sessionModel().sessionItem().renderer;
+    for (auto renderer_ptr : {
+             &sInstance->mGLRenderer,
+             &sInstance->mVKRenderer,
+             &sInstance->mD3DRenderer,
+         })
+        if (auto renderer = *renderer_ptr)
+            if (renderer->failed() && renderer->type() != type)
+                *renderer_ptr = nullptr;
+
+    switch (type) {
+    case Session::Renderer::OpenGL:   return glRenderer();
+    case Session::Renderer::Vulkan:   return vkRenderer();
+    case Session::Renderer::Direct3D: return d3dRenderer();
+    }
+    Q_UNREACHABLE();
+    return nullptr;
 }
 
 RendererPtr Singletons::glRenderer()
@@ -41,6 +59,14 @@ RendererPtr Singletons::vkRenderer()
     if (!sInstance->mVKRenderer)
         sInstance->mVKRenderer = std::make_shared<VKRenderer>();
     return sInstance->mVKRenderer;
+}
+
+RendererPtr Singletons::d3dRenderer()
+{
+    Q_ASSERT(onMainThread());
+    if (!sInstance->mD3DRenderer)
+        sInstance->mD3DRenderer = std::make_shared<D3DRenderer>();
+    return sInstance->mD3DRenderer;
 }
 
 Settings &Singletons::settings()
@@ -110,7 +136,6 @@ Singletons::Singletons(QMainWindow *window)
     , mVideoManager(std::make_unique<VideoManager>())
     , mInputState(std::make_unique<InputState>())
     , mCustomActions(std::make_unique<CustomActions>())
-    , mDefaultScriptEngine(ScriptEngine::make())
 {
     Q_ASSERT(onMainThread());
     sInstance = this;
@@ -120,7 +145,7 @@ Singletons::Singletons(QMainWindow *window)
         &videoManager(), &VideoManager::handleVideoPlayerRequested,
         Qt::QueuedConnection);
 
-    mDefaultScriptEngine->setOmitReferenceErrors();
+    mDefaultScriptEngine = ScriptEngine::make(QDir::current());
 }
 
 Singletons::~Singletons() = default;

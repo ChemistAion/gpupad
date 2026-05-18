@@ -8,6 +8,10 @@
 #include <QTextStream>
 #include <QThread>
 
+#if defined(QtMultimedia_FOUND)
+#  include <QVideoFrame>
+#endif
+
 namespace {
     const auto textureUpdateInterval = 5;
     const auto nonTextureUpdateInterval = 1000;
@@ -33,7 +37,7 @@ namespace {
                     return true;
                 return false;
             });
-    };
+    }
 
     bool loadSource(const QString &fileName, QString *source)
     {
@@ -132,6 +136,16 @@ public Q_SLOTS:
             Q_EMIT loadingFailed(fileName);
     }
 
+    void convertVideoFrame(const QString &fileName, bool flipVertically,
+        const QVideoFrame &frame)
+    {
+#if defined(QtMultimedia_FOUND)
+        auto texture = TextureData();
+        if (texture.loadQImage(frame.toImage(), flipVertically))
+            Q_EMIT textureLoaded(fileName, flipVertically, std::move(texture));
+#endif
+    }
+
 Q_SIGNALS:
     void sourceLoaded(const QString &fileName, QString source);
     void textureLoaded(const QString &fileName, bool flipVertically,
@@ -156,6 +170,8 @@ FileCache::FileCache(QObject *parent) : QObject(parent)
         &BackgroundLoader::loadTexture);
     connect(this, &FileCache::reloadBinary, backgroundLoader,
         &BackgroundLoader::loadBinary);
+    connect(this, &FileCache::convertVideoFrame, backgroundLoader,
+        &BackgroundLoader::convertVideoFrame);
 
     connect(backgroundLoader, &BackgroundLoader::sourceLoaded, this,
         &FileCache::handleSourceReloaded);
@@ -284,7 +300,8 @@ bool FileCache::getTexture(const QString &fileName, bool flipVertically,
 
     addFileSystemWatch(fileName);
 
-    if (FileDialog::isVideoFileName(fileName)) {
+    if (FileDialog::isVideoFileName(fileName)
+        || FileDialog::isSequenceFileName(fileName)) {
         texture->create(QOpenGLTexture::Target2D, QOpenGLTexture::RGB8_UNorm, 1,
             1, 1, 1);
         texture->clear();
@@ -297,22 +314,89 @@ bool FileCache::getTexture(const QString &fileName, bool flipVertically,
     return true;
 }
 
-bool FileCache::updateTexture(const QString &fileName, bool flippedVertically,
+void FileCache::updateSource(const QString &fileName, QString source)
+{
+    Q_ASSERT(isNativeCanonicalFilePath(fileName));
+    auto &editorManager = Singletons::editorManager();
+    if (auto editor = (FileDialog::isUntitled(fileName)
+                ? editorManager.getSourceEditor(fileName)
+                : editorManager.openSourceEditor(fileName, true))) {
+        editor->replace(std::move(source));
+    } else {
+        QMutexLocker lock(&mMutex);
+        mSources[fileName] = std::move(source);
+        lock.unlock();
+        Q_EMIT fileChanged(fileName);
+    }
+}
+
+void FileCache::updateTexture(const QString &fileName, bool flippedVertically,
     TextureData texture)
 {
     Q_ASSERT(!texture.isNull());
     Q_ASSERT(isNativeCanonicalFilePath(fileName));
-    QMutexLocker lock(&mMutex);
+    auto &editorManager = Singletons::editorManager();
+    if (auto editor = (FileDialog::isUntitled(fileName)
+                ? editorManager.getTextureEditor(fileName)
+                : editorManager.openTextureEditor(fileName, true))) {
+        editor->replace(std::move(texture));
+    } else {
+        QMutexLocker lock(&mMutex);
+        mTextures[TextureKey(fileName, flippedVertically)] = std::move(texture);
+        lock.unlock();
+        Q_EMIT fileChanged(fileName);
+    }
+}
 
-    const auto key = TextureKey(fileName, flippedVertically);
-    if (!mTextures.contains(key))
-        return false;
-    mTextures[key] = std::move(texture);
-    lock.unlock();
+void FileCache::updateVideoTexture(const QString &fileName,
+    bool flippedVertically, const QVideoFrame &frame)
+{
+    Q_EMIT convertVideoFrame(fileName, flippedVertically, frame,
+        QPrivateSignal());
+}
 
-    Q_EMIT fileChanged(fileName);
+void FileCache::updateBinary(const QString &fileName, QByteArray binary)
+{
+    Q_ASSERT(isNativeCanonicalFilePath(fileName));
+    auto &editorManager = Singletons::editorManager();
+    if (auto editor = (FileDialog::isUntitled(fileName)
+                ? editorManager.getBinaryEditor(fileName)
+                : editorManager.openBinaryEditor(fileName, true))) {
+        editor->replace(binary);
+    } else {
+        QMutexLocker lock(&mMutex);
+        mBinaries[fileName] = std::move(binary);
+        lock.unlock();
+        Q_EMIT fileChanged(fileName);
+    }
+}
 
-    return true;
+void FileCache::updateBinaryRange(const QString &fileName, int offset,
+    const QByteArray &range)
+{
+    Q_ASSERT(isNativeCanonicalFilePath(fileName));
+    Q_ASSERT(offset >= 0);
+    if (offset < 0)
+        return;
+
+    auto data = QByteArray();
+    if (auto editor = Singletons::editorManager().getBinaryEditor(fileName)) {
+        data = editor->data();
+    } else {
+        getBinary(fileName, &data);
+    }
+    if (offset == 0 && range.size() >= data.size())
+        return updateBinary(fileName, range);
+
+    if (data.size() >= range.size() + offset
+        && !std::memcmp(data.data() + offset, range.constData(), range.size()))
+        return;
+
+    if (offset + range.size() > data.size())
+        data.resize(offset + range.size());
+    std::memcpy(data.data() + offset, range.constData(), range.size());
+
+    updateBinary(fileName, data);
 }
 
 bool FileCache::getBinary(const QString &fileName, QByteArray *binary) const
@@ -342,7 +426,8 @@ void FileCache::handleFileSystemFileChanged(const QString &fileName)
 void FileCache::addFileSystemWatch(const QString &fileName, bool changed) const
 {
     Q_ASSERT(isNativeCanonicalFilePath(fileName));
-    if (!FileDialog::isEmptyOrUntitled(fileName))
+    if (!FileDialog::isEmptyOrUntitled(fileName)
+        && !FileDialog::isSequenceFileName(fileName))
         mFileSystemWatchesToAdd[fileName] |= changed;
 }
 

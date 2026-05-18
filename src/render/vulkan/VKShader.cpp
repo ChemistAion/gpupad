@@ -30,7 +30,7 @@ namespace {
     std::optional<MessageType> checkShaderTypeSupport(Shader::ShaderType type,
         const KDGpu::Device &device)
     {
-        const auto& features = device.adapter()->features();
+        const auto &features = device.adapter()->features();
         switch (type) {
         case Shader::ShaderType::Task:
         case Shader::ShaderType::Mesh:
@@ -50,7 +50,7 @@ namespace {
 
         default: break;
         }
-        return { };
+        return {};
     }
 } // namespace
 
@@ -63,13 +63,13 @@ VKShader::VKShader(Shader::ShaderType type,
 void VKShader::create(KDGpu::Device &device, const Spirv &spirv)
 {
     if (auto messageType = checkShaderTypeSupport(mType, device)) {
-        mMessages += MessageList::insert(mItemId, *messageType);
+        mMessages.insert(mItemId, *messageType);
         return;
     }
 
-    Q_ASSERT(spirv);
-    mShaderModule = device.createShaderModule(spirv.spirv());
-    mInterface = spirv.getInterface();
+    Q_ASSERT(!spirv.empty());
+    mShaderModule = device.createShaderModule(spirv);
+    mReflection = Reflection(spirv);
 }
 
 KDGpu::ShaderStage VKShader::getShaderStage() const
@@ -85,6 +85,5 @@ QStringList VKShader::preprocessorDefinitions() const
 {
     auto definitions = ShaderBase::preprocessorDefinitions();
     definitions.append("GPUPAD_VULKAN 1");
-    definitions.append("GPUPAD_GLSLANG 1");
     return definitions;
 }

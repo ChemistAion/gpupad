@@ -10,19 +10,17 @@ class SessionModelCore : public QAbstractItemModel
 public:
     enum ColumnType {
         Name = 0,
+        Custom,
         FileName,
 
         SessionRenderer,
+        SessionShaderLanguage,
         SessionShaderCompiler,
+        SessionShaderCompilerSettings,
         SessionShaderPreamble,
         SessionShaderIncludePaths,
         SessionReverseCulling,
         SessionFlipViewport,
-        SessionAutoMapBindings,
-        SessionAutoMapLocations,
-        SessionAutoSampledTextures,
-        SessionVulkanRulesRelaxed,
-        SessionSpirvVersion,
         GroupInlineScope,
         GroupIterations,
         GroupDynamic,
@@ -41,7 +39,6 @@ public:
         TextureFlipVertically,
         ScriptExecuteOn,
         ShaderType,
-        ShaderLanguage,
         ShaderEntryPoint,
         ShaderPreamble,
         ShaderIncludePaths,
@@ -192,6 +189,9 @@ public:
     {
         return castItem<T>(SessionModelCore::findItem(id));
     }
+
+Q_SIGNALS:
+    void itemRenamed(const QModelIndex &index, const QString &prevName);
 
 protected:
     const Root &root() const { return mRoot; }

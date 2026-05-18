@@ -2,86 +2,77 @@
 
 #include "GLShader.h"
 #include "GLBuffer.h"
-#include "scripting/ScriptEngine.h"
 #include <map>
 
 class GLProgram
 {
 public:
-    struct Interface
+    struct Uniform
     {
-        struct Uniform
-        {
-            GLint binding;
-            GLint location;
-            GLenum dataType;
-            GLint size;
-        };
+        QString name;
+        GLint location;
+        GLenum dataType;
+        GLint arraySize;
+    };
 
-        struct BufferMember
-        {
-            GLenum dataType;
-            GLint size;
-            GLint offset;
-            GLint arrayStride;
-            GLint matrixStride;
-            bool isRowMajor;
-        };
+    struct Subroutine
+    {
+        QString name;
+        QStringList subroutines;
+    };
+    using StageSubroutines =
+        std::map<Shader::ShaderType, std::vector<Subroutine>>;
 
-        struct BufferBindingPoint
-        {
-            GLenum target;
-            GLuint index;
-            std::map<QString, BufferMember> members;
-            int minimumSize;
-            bool readonly;
-        };
-
-        struct Subroutine
-        {
-            QString name;
-            QStringList subroutines;
-        };
-
-        std::map<QString, GLuint> attributeLocations;
-        std::map<QString, Uniform> uniforms;
-        std::map<QString, BufferBindingPoint> bufferBindingPoints;
-        std::map<Shader::ShaderType, std::vector<Subroutine>> stageSubroutines;
+    struct BindingPoint
+    {
+        GLenum target;
+        GLuint index;
     };
 
     GLProgram(const Program &program, const Session &session);
     bool operator==(const GLProgram &rhs) const;
 
-    bool link();
+    bool validate();
+    bool link(GLContext &context);
     bool bind();
     void unbind();
+    ItemId itemId() const { return mItemId; }
     const Session &session() const { return mSession; }
-    const Interface &interface() const { return mInterface; }
+    const Reflection &reflection() const { return mReflection; }
     const QSet<ItemId> &usedItems() const { return mUsedItems; }
+    BindingPoint getDescriptorBindingPoint(
+        const SpvReflectDescriptorBinding &desc, int arrayIndex = 0) const;
     GLBuffer &getDynamicUniformBuffer(const QString &name, int size);
     const std::vector<GLShader> &shaders() const { return mShaders; }
+    const std::vector<Uniform> &uniforms() const { return mUniforms; }
+    const StageSubroutines &stageSubroutines() const
+    {
+        return mStageSubroutines;
+    }
+    GLPrintf &printf() { return mPrintf; }
+    MessagePtrSet resetMessages();
+    QString tryGetProgramBinary();
 
 private:
-    bool compileShaders();
+    bool compileShaders(PrintfBase &printf);
     bool linkProgram();
-    bool getInterfaceFromSpirv() const;
-    void fillInterface(Interface &interface, GLuint program);
-    void fillInterface(Interface &interface,
-        const Spirv::Interface &spirvInterface);
-    void automapUniformBindings(Interface &interface);
-    void applyPrintfBindings();
+    void generateReflectionFromProgram(GLuint program,
+        bool generateGlobalUniformBlockBinding);
+    void enumerateSubroutines(GLuint program);
 
     ItemId mItemId{};
     Session mSession{};
     QSet<ItemId> mUsedItems;
-    MessagePtrSet mLinkMessages;
+    MessagePtrSet mMessages;
     std::vector<GLShader> mShaders;
     std::vector<GLShader> mIncludableShaders;
     GLObject mProgramObject;
-    Interface mInterface;
+    Reflection mReflection;
     bool mFailed{};
     GLPrintf mPrintf;
-    MessagePtrSet mPrintfMessages;
-    Interface::BufferBindingPoint mPrintfBufferBindingPoint{};
     std::map<QString, GLBuffer> mDynamicUniformBuffers;
+    std::vector<Uniform> mUniforms;
+    std::map<QString, BindingPoint> mDescriptorBindingPoints;
+    std::map<Shader::ShaderType, Spirv> mStageSpirv;
+    std::map<Shader::ShaderType, std::vector<Subroutine>> mStageSubroutines;
 };

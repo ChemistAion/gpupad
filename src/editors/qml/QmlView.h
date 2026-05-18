@@ -3,12 +3,11 @@
 #include "MessageList.h"
 #include "editors/IEditor.h"
 #include <QFrame>
-#include <QSet>
 
 class Theme;
-class QQuickWidget;
 class QQmlNetworkAccessManagerFactory;
 using QScriptEnginePtr = std::shared_ptr<class ScriptEngine>;
+class QQuickView;
 
 class QmlView : public QFrame, public IEditor
 {
@@ -27,14 +26,17 @@ public:
     bool save() override;
     void setModified() override;
     int tabifyGroup() const override { return 3; }
+    QSize minimumSizeHint() const override { return QSize(150, 150); }
 
     const QScriptEnginePtr &enginePtr() const { return mEnginePtr; }
+    QString actionId() const;
     void addDependency(const QString &fileName);
     bool dependsOn(const QString &fileName) const;
     void resetOnFocus();
 
 private:
     void windowThemeChanged(const Theme &theme);
+    QColor backgroundColor() const;
     void reset();
 
     const QString mFileName;
@@ -42,7 +44,8 @@ private:
     std::unique_ptr<QQmlNetworkAccessManagerFactory>
         mNetworkAccessManagerFactory;
     MessagePtrSet mMessages;
-    QQuickWidget *mQuickWidget{};
+    QQuickView *mQuickView{};
+    QWidget *mQuickWidget{};
     QSet<QString> mDependencies;
     bool mResetOnFocus{};
 };

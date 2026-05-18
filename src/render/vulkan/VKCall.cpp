@@ -48,7 +48,7 @@ void VKCall::setIndexBuffer(VKBuffer *indices, const Block &block)
         }
     const auto indexType = getKDIndexType(indexSize);
     if (!indexType || !indexSize) {
-        mMessages += MessageList::insert(block.id,
+        mMessages.insert(block.id,
             MessageType::InvalidIndexType,
             QStringLiteral("%1 bytes").arg(indexSize));
         return;
@@ -75,7 +75,7 @@ void VKCall::setIndirectBuffer(VKBuffer *commands, const Block &block)
     const auto expectedStride =
         static_cast<int>((mKind.compute ? 3 : 4) * sizeof(uint32_t));
     if (mIndirectStride != expectedStride) {
-        mMessages += MessageList::insert(block.id,
+        mMessages.insert(block.id,
             MessageType::InvalidIndirectStride,
             QStringLiteral("%1/%2 bytes")
                 .arg(mIndirectStride)
@@ -110,88 +110,74 @@ bool VKCall::validateShaderTypes()
         return false;
     for (const auto &shader : mProgram->shaders())
         if (!callTypeSupportsShaderType(mCall.callType, shader.type())) {
-            mMessages += MessageList::insert(mCall.id,
+            mMessages.insert(mCall.id,
                 MessageType::InvalidShaderTypeForCall);
             return false;
         }
     return true;
 }
 
-VKPipeline *VKCall::getPipeline(VKContext &context)
+void VKCall::execute(VKContext &context, Bindings &&bindings,
+    MessagePtrSet &messages, ScriptEngine &scriptEngine)
 {
-    if (!mPipeline && mProgram) {
-        if (!validateShaderTypes())
-            return nullptr;
+    if (mKind.trace && !context.features().rayTracingPipeline) {
+        mMessages.insert(mCall.id, MessageType::RayTracingNotAvailable);
+        return;
+    }
 
-        if (!mProgram->link(context.device))
-            return nullptr;
+    if (mKind.mesh && !context.features().meshShader) {
+        mMessages.insert(mCall.id, MessageType::MeshShadersNotAvailable);
+        return;
+    }
+
+    if (mKind.draw || mKind.compute || mKind.trace) {
+        if (!mProgram) {
+            messages.insert(mCall.id, MessageType::ProgramNotAssigned);
+            return;
+        }
+        mUsedItems += mProgram->usedItems();
+    }
+
+    if (mProgram && !mPipeline) {
+        if (!validateShaderTypes())
+            return;
+
+        if (!mProgram->link(context))
+            return;
 
         if (mVertexStream)
             mUsedItems += mVertexStream->usedItems();
 
         mPipeline = std::make_unique<VKPipeline>(mCall.id, mProgram);
     }
-    return mPipeline.get();
-}
-
-void VKCall::execute(VKContext &context, MessagePtrSet &messages,
-    ScriptEngine &scriptEngine)
-{
-    if (mKind.trace && !context.features().rayTracingPipeline) {
-        mMessages +=
-            MessageList::insert(mCall.id, MessageType::RayTracingNotAvailable);
-        return;
-    }
-
-    if (mKind.mesh && !context.features().meshShader) {
-        mMessages +=
-            MessageList::insert(mCall.id, MessageType::MeshShadersNotAvailable);
-        return;
-    }
-
-    if (mKind.draw || mKind.compute || mKind.trace) {
-        if (!mProgram) {
-            messages +=
-                MessageList::insert(mCall.id, MessageType::ProgramNotAssigned);
-            return;
-        }
-        mUsedItems += mProgram->usedItems();
-    }
 
     if (mKind.draw) {
         if (!mTarget) {
-            messages +=
-                MessageList::insert(mCall.id, MessageType::TargetNotAssigned);
+            messages.insert(mCall.id, MessageType::TargetNotAssigned);
             return;
         }
         mUsedItems += mTarget->usedItems();
     }
 
     if (mKind.indexed && !mIndexBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::IndexBufferNotAssigned);
+        messages.insert(mCall.id, MessageType::IndexBufferNotAssigned);
         return;
     }
 
     if (mKind.trace && !mAccelerationStructure) {
-        messages += MessageList::insert(mCall.id,
+        messages.insert(mCall.id,
             MessageType::AccelerationStructureNotAssigned);
         return;
     }
 
     if (mKind.indirect && !mIndirectBuffer) {
-        messages += MessageList::insert(mCall.id,
+        messages.insert(mCall.id,
             MessageType::IndirectBufferNotAssigned);
         return;
     }
 
-    context.commandRecorder = context.device.createCommandRecorder();
-    auto guard = qScopeGuard([&] { context.commandRecorder.reset(); });
-
-    auto &recorder = context.timestampQueries[mCall.id];
-    recorder =
-        context.commandRecorder->beginTimestampRecording({ .queryCount = 2 });
-    recorder.writeTimestamp(KDGpu::PipelineStageFlagBit::TopOfPipeBit);
+    if (mPipeline)
+        mPipeline->setBindings(std::move(bindings));
 
     switch (mCall.callType) {
     case Call::CallType::Draw:
@@ -224,15 +210,13 @@ void VKCall::execute(VKContext &context, MessagePtrSet &messages,
     case Call::CallType::SwapTextures: executeSwapTextures(messages); break;
     case Call::CallType::SwapBuffers:  executeSwapBuffers(messages); break;
     }
-
-    recorder.writeTimestamp(KDGpu::PipelineStageFlagBit::BottomOfPipeBit);
-    context.commandBuffers.push_back(context.commandRecorder->finish());
 }
 
 int VKCall::getMaxElementCount(ScriptEngine &scriptEngine)
 {
     if (mKind.indexed)
-        return scriptEngine.evaluateInt(mIndicesRowCount, mCall.id) * mIndicesPerRow;
+        return scriptEngine.evaluateInt(mIndicesRowCount, mCall.id)
+            * mIndicesPerRow;
     if (mVertexStream)
         return mVertexStream->maxElementCount();
     return -1;
@@ -246,19 +230,23 @@ void VKCall::executeDraw(VKContext &context, MessagePtrSet &messages,
     const auto count = (!mCall.count.isEmpty()
             ? scriptEngine.evaluateUInt(mCall.count, mCall.id)
             : std::max(maxElementCount - static_cast<int>(first), 0));
-    const auto instanceCount = scriptEngine.evaluateUInt(mCall.instanceCount, mCall.id);
-    const auto baseVertex = scriptEngine.evaluateInt(mCall.baseVertex, mCall.id);
-    const auto firstInstance = scriptEngine.evaluateUInt(mCall.baseInstance, mCall.id);
+    const auto instanceCount =
+        scriptEngine.evaluateUInt(mCall.instanceCount, mCall.id);
+    const auto baseVertex =
+        scriptEngine.evaluateInt(mCall.baseVertex, mCall.id);
+    const auto firstInstance =
+        scriptEngine.evaluateUInt(mCall.baseInstance, mCall.id);
     const auto drawCount = scriptEngine.evaluateUInt(mCall.drawCount, mCall.id);
-    const auto indirectOffset =
-        (mKind.indirect ? scriptEngine.evaluateUInt(mIndirectOffset, mCall.id) : 0);
+    const auto indirectOffset = (mKind.indirect
+            ? scriptEngine.evaluateUInt(mIndirectOffset, mCall.id)
+            : 0);
 
     if (!count)
         return;
 
     if (maxElementCount >= 0
         && first + count > static_cast<uint32_t>(maxElementCount)) {
-        mMessages += MessageList::insert(mCall.id, MessageType::CountExceeded,
+        mMessages.insert(mCall.id, MessageType::CountExceeded,
             first ? QStringLiteral("%1 + %2 > %3")
                         .arg(first)
                         .arg(count)
@@ -299,14 +287,15 @@ void VKCall::executeDraw(VKContext &context, MessagePtrSet &messages,
         return;
 
     if (mIndexBuffer) {
-        const auto indicesOffset = scriptEngine.evaluateUInt(mIndicesOffset, mCall.id);
+        const auto indicesOffset =
+            scriptEngine.evaluateUInt(mIndicesOffset, mCall.id);
         renderPass.setIndexBuffer(mIndexBuffer->buffer(), indicesOffset,
             mIndexType);
     }
 
     if (maxElementCount >= 0
         && first + count > static_cast<uint32_t>(maxElementCount)) {
-        mMessages += MessageList::insert(mCall.id, MessageType::CountExceeded,
+        mMessages.insert(mCall.id, MessageType::CountExceeded,
             first ? QStringLiteral("%1 + %2 > %3")
                         .arg(first)
                         .arg(count)
@@ -346,9 +335,12 @@ void VKCall::executeDraw(VKContext &context, MessagePtrSet &messages,
         });
     } else if (mCall.callType == Call::CallType::DrawMeshTasks) {
         renderPass.drawMeshTasks({
-            .workGroupX = scriptEngine.evaluateUInt(mCall.workGroupsX, mCall.id),
-            .workGroupY = scriptEngine.evaluateUInt(mCall.workGroupsY, mCall.id),
-            .workGroupZ = scriptEngine.evaluateUInt(mCall.workGroupsZ, mCall.id),
+            .workGroupX =
+                scriptEngine.evaluateUInt(mCall.workGroupsX, mCall.id),
+            .workGroupY =
+                scriptEngine.evaluateUInt(mCall.workGroupsY, mCall.id),
+            .workGroupZ =
+                scriptEngine.evaluateUInt(mCall.workGroupsZ, mCall.id),
         });
     } else if (mCall.callType == Call::CallType::DrawMeshTasksIndirect) {
         renderPass.drawMeshTasksIndirect({
@@ -430,8 +422,7 @@ void VKCall::executeTraceRays(VKContext &context, MessagePtrSet &messages,
 void VKCall::executeClearTexture(VKContext &context, MessagePtrSet &messages)
 {
     if (!mTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
 
@@ -451,10 +442,8 @@ void VKCall::executeClearTexture(VKContext &context, MessagePtrSet &messages)
         color[2] = srgbToLinear(color[2]);
     }
 
-    //auto guard = beginTimerQuery();
     if (!mTexture->clear(context, color, mCall.clearDepth, mCall.clearStencil))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::ClearingTextureFailed);
+        messages.insert(mCall.id, MessageType::ClearingTextureFailed);
 
     mUsedItems += mTexture->usedItems();
 }
@@ -462,13 +451,11 @@ void VKCall::executeClearTexture(VKContext &context, MessagePtrSet &messages)
 void VKCall::executeCopyTexture(VKContext &context, MessagePtrSet &messages)
 {
     if (!mTexture || !mFromTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
     if (!mTexture->copy(context, *mFromTexture))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::CopyingTextureFailed);
+        messages.insert(mCall.id, MessageType::CopyingTextureFailed);
 
     mUsedItems += mTexture->usedItems();
     mUsedItems += mFromTexture->usedItems();
@@ -477,8 +464,7 @@ void VKCall::executeCopyTexture(VKContext &context, MessagePtrSet &messages)
 void VKCall::executeClearBuffer(VKContext &context, MessagePtrSet &messages)
 {
     if (!mBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
     mBuffer->clear(context);
@@ -488,8 +474,7 @@ void VKCall::executeClearBuffer(VKContext &context, MessagePtrSet &messages)
 void VKCall::executeCopyBuffer(VKContext &context, MessagePtrSet &messages)
 {
     if (!mBuffer || !mFromBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
     mBuffer->copy(context, *mFromBuffer);
@@ -500,23 +485,25 @@ void VKCall::executeCopyBuffer(VKContext &context, MessagePtrSet &messages)
 void VKCall::executeSwapTextures(MessagePtrSet &messages)
 {
     if (!mTexture || !mFromTexture) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::TextureNotAssigned);
+        messages.insert(mCall.id, MessageType::TextureNotAssigned);
         return;
     }
     if (!mTexture->swap(*mFromTexture))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::SwappingTexturesFailed);
+        messages.insert(mCall.id, MessageType::SwappingTexturesFailed);
+
+    mUsedItems += mTexture->itemId();
+    mUsedItems += mFromTexture->itemId();
 }
 
 void VKCall::executeSwapBuffers(MessagePtrSet &messages)
 {
     if (!mBuffer || !mFromBuffer) {
-        messages +=
-            MessageList::insert(mCall.id, MessageType::BufferNotAssigned);
+        messages.insert(mCall.id, MessageType::BufferNotAssigned);
         return;
     }
     if (!mBuffer->swap(*mFromBuffer))
-        messages +=
-            MessageList::insert(mCall.id, MessageType::SwappingBuffersFailed);
+        messages.insert(mCall.id, MessageType::SwappingBuffersFailed);
+
+    mUsedItems += mBuffer->itemId();
+    mUsedItems += mFromBuffer->itemId();
 }

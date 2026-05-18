@@ -4,7 +4,10 @@
 #include <QFontDialog>
 #include <QIcon>
 
-Settings::Settings(QObject *parent) : QSettings(parent)
+Settings::Settings(QObject *parent) 
+    : QSettings(parent)
+    , mWindowTheme(&Theme::getTheme(""))
+    , mEditorTheme(&Theme::getTheme(""))
 {
     mFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     QIcon::setThemeName("light");
@@ -15,6 +18,7 @@ Settings::Settings(QObject *parent) : QSettings(parent)
     setIndentWithSpaces(value("indentWithSpaces", "true").toBool());
     setShowWhiteSpace(value("showWhiteSpace", "false").toBool());
     setHideMenuBar(value("hideMenuBar", "false").toBool());
+    setSyncInterval(value("syncInterval", "1").toInt());
 
     const auto fontSettings = value("font").toString();
     auto font = QFont();
@@ -46,6 +50,7 @@ Settings::~Settings()
     setValue("editorTheme", editorTheme().fileName());
     setValue("hideMenuBar", hideMenuBar());
     setValue("font", font().toString());
+    setValue("syncInterval", syncInterval());
     endGroup();
 }
 
@@ -120,5 +125,12 @@ void Settings::setHideMenuBar(bool hide)
     if (mHideMenuBar != hide) {
         mHideMenuBar = hide;
         Q_EMIT hideMenuBarChanged(hide);
+    }
+}
+
+void Settings::setSyncInterval(int syncInterval) {
+    if (mSyncInterval != syncInterval) {
+        mSyncInterval = syncInterval;
+        Q_EMIT syncIntervalChanged(syncInterval);
     }
 }

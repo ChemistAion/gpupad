@@ -2,6 +2,7 @@
 #include "AppScriptObject.h"
 #include "Singletons.h"
 #include "editors/EditorManager.h"
+#include "editors/qml/QmlView.h"
 #include <QJsonArray>
 
 EditorScriptObject::EditorScriptObject(AppScriptObject *appScriptObject,
@@ -9,6 +10,7 @@ EditorScriptObject::EditorScriptObject(AppScriptObject *appScriptObject,
     : QObject(appScriptObject)
     , mAppScriptObject(appScriptObject)
     , mFileName(fileName)
+    , mTitle(FileDialog::getFileTitle(fileName))
 {
 }
 
@@ -25,8 +27,34 @@ void EditorScriptObject::resetAppScriptObject()
 
 void EditorScriptObject::update()
 {
+    Q_ASSERT(onMainThread());
+
+    switch (Singletons::editorManager().getEditorType(mFileName)) {
+    case EditorType::None:
+    case EditorType::Text:    mEditorType = "Text"; break;
+    case EditorType::Shader:  mEditorType = "Shader"; break;
+    case EditorType::Script:  mEditorType = "Script"; break;
+    case EditorType::Binary:  mEditorType = "Binary"; break;
+    case EditorType::Texture: mEditorType = "Texture"; break;
+    case EditorType::QmlView: mEditorType = "QmlView"; break;
+    }
+
     mViewportSizeWasRead = false;
-    mViewportSize = Singletons::editorManager().getViewportSize(mFileName);
+    const auto viewportSize =
+        Singletons::editorManager().getViewportSize(mFileName);
+    if (mViewportSize != viewportSize) {
+        mViewportSize = viewportSize;
+        Q_EMIT viewportResized();
+    }
+}
+
+void EditorScriptObject::setTitle(QString title)
+{
+    if (onMainThread())
+        if (auto editor = Singletons::editorManager().getQmlView(mFileName)) {
+            mTitle = title.remove("&").replace("...", "");
+            editor->setWindowTitle(mTitle);
+        }
 }
 
 QJsonValue EditorScriptObject::viewportSize() const

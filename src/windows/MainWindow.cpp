@@ -2,8 +2,6 @@
 #include "AboutDialog.h"
 #include "AutoOrientationSplitter.h"
 #include "FileBrowserWindow.h"
-#include "InputState.h"
-#include "MessageList.h"
 #include "MessageWindow.h"
 #include "OutputWindow.h"
 #include "Settings.h"
@@ -11,26 +9,27 @@
 #include "SynchronizeLogic.h"
 #include "Theme.h"
 #include "WindowTitle.h"
+#include "render/GLWindow.h"
 #include "editors/EditorManager.h"
 #include "editors/IEditor.h"
+#include "editors/qml/QmlView.h"
 #include "getEventPosition.h"
 #include "scripting/CustomActions.h"
+#include "scripting/ScriptTimeout.h"
 #include "session/SessionEditor.h"
 #include "session/SessionModel.h"
-#include "session/PropertiesEditor.h"
+#include "session/properties/PropertiesEditor.h"
 #include "ui_MainWindow.h"
 #include <QActionGroup>
 #include <QCloseEvent>
-#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDockWidget>
-#include <QMenu>
-#include <QMessageBox>
 #include <QMimeData>
-#include <QOpenGLWidget>
-#include <QScreen>
-#include <QTimer>
 #include <QToolButton>
+
+// increase when restoring old session states does not work properly
+const auto MainWindowStateVersion = 1;
+const auto EditorManagerStateVersion = 1;
 
 void setFileDialogDirectory(const QString &fileName)
 {
@@ -52,6 +51,11 @@ MainWindow::MainWindow(QWidget *parent)
     mUi->setupUi(this);
     setFont(qApp->font());
 
+    mSyncWindow = new GLWindow(1);
+    auto container = QWidget::createWindowContainer(mSyncWindow);
+    container->setGeometry(0, 0, 1, 1);
+    container->setParent(this);
+
     setAcceptDrops(true);
 
     auto icon = QIcon(":images/16x16/icon.png");
@@ -62,15 +66,10 @@ MainWindow::MainWindow(QWidget *parent)
     mUi->menubar->setFixedHeight(24);
     mUi->toolBarMain->toggleViewAction()->setVisible(false);
 
+    setDockOptions(QMainWindow::AllowNestedDocks);
     takeCentralWidget();
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    // WORKAROUND: trigger initialization of OpenGL immediately, otherwise
-    // application window disappears momentaryly when the first texture editor is opened
-    (new QOpenGLWidget(this))->setVisible(false);
-#endif
-
-    setContentsMargins(2, 0, 2, 2);
+    setDefaultContentsMargins();
     auto content = new QWidget(this);
     mEditorManager.setParent(content);
     auto layout = new QVBoxLayout(content);
@@ -137,6 +136,7 @@ MainWindow::MainWindow(QWidget *parent)
     dock->setWidget(mSessionSplitter);
     dock->setVisible(false);
     dock->setMinimumSize(200, 150);
+    dock->setSizePolicy({ QSizePolicy::Fixed, QSizePolicy::Fixed });
     auto action = dock->toggleViewAction();
     action->setObjectName("toggle" + dock->objectName());
     action->setText(tr("Show &") + action->text());
@@ -155,6 +155,7 @@ MainWindow::MainWindow(QWidget *parent)
     dock->setWidget(mFileBrowserWindow.get());
     dock->setVisible(false);
     dock->setMinimumSize(150, 150);
+    dock->setSizePolicy({ QSizePolicy::Fixed, QSizePolicy::Fixed });
     action = dock->toggleViewAction();
     action->setObjectName("toggle" + dock->objectName());
     action->setText(tr("Show &") + action->text());
@@ -165,12 +166,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     dock = new QDockWidget(tr("Messages"), this);
     dock->setObjectName("Messages");
-    dock->setTitleBarWidget(new WindowTitle(dock));
+    dock->setTitleBarWidget(mMessageWindow->titleBar());
     dock->setFeatures(QDockWidget::DockWidgetClosable
         | QDockWidget::DockWidgetMovable);
     dock->setWidget(mMessageWindow.get());
     dock->setVisible(false);
     dock->setMinimumSize(150, 150);
+    dock->setSizePolicy({ QSizePolicy::Fixed, QSizePolicy::Fixed });
     action = dock->toggleViewAction();
     action->setObjectName("toggle" + dock->objectName());
     action->setText(tr("Show &") + action->text());
@@ -187,6 +189,7 @@ MainWindow::MainWindow(QWidget *parent)
     dock->setWidget(mOutputWindow.get());
     dock->setVisible(false);
     dock->setMinimumSize(150, 150);
+    dock->setSizePolicy({ QSizePolicy::Fixed, QSizePolicy::Fixed });
     action = dock->toggleViewAction();
     action->setObjectName("toggle" + dock->objectName());
     action->setText(tr("Show &") + action->text());
@@ -293,6 +296,8 @@ MainWindow::MainWindow(QWidget *parent)
         [this](const QString &fileName) { openFile(fileName); });
 
     auto &synchronizeLogic = Singletons::synchronizeLogic();
+    connect(&synchronizeLogic, &SynchronizeLogic::waitingForSync, this,
+        &MainWindow::waitForSync);
     connect(mOutputWindow.get(), &OutputWindow::typeSelectionChanged,
         &synchronizeLogic, &SynchronizeLogic::setProcessSourceType);
     connect(outputDock, &QDockWidget::visibilityChanged, [this](bool visible) {
@@ -307,10 +312,6 @@ MainWindow::MainWindow(QWidget *parent)
         [this](const QVariant &value) {
             mOutputWindow->setText(value.toString());
         });
-    connect(&Singletons::inputState(), &InputState::mouseChanged,
-        &synchronizeLogic, &SynchronizeLogic::handleMouseStateChanged);
-    connect(&Singletons::inputState(), &InputState::keysChanged,
-        &synchronizeLogic, &SynchronizeLogic::handleKeyboardStateChanged);
 
     auto &settings = Singletons::settings();
     connect(mUi->actionSelectFont, &QAction::triggered, &settings,
@@ -336,26 +337,61 @@ MainWindow::MainWindow(QWidget *parent)
         &MainWindow::updateEvaluationMode);
     connect(mUi->actionEvalSteady, &QAction::toggled, this,
         &MainWindow::updateEvaluationMode);
+    connect(&synchronizeLogic, &SynchronizeLogic::evaluationModeChanged, this,
+        &MainWindow::setEvaluationMode);
 
     connect(mUi->menuCustomActions, &QMenu::aboutToShow, this,
         &MainWindow::updateCustomActionsMenu);
+    connect(mUi->actionCustomActions, &QAction::triggered, [this]() {
+        if (auto *tb = qobject_cast<QToolButton *>(
+                mUi->toolBarMain->widgetForAction(mUi->actionCustomActions))) {
+            tb->setDown(true);
+            tb->showMenu();
+        }
+    });
 
     auto *customActionsButton = static_cast<QToolButton *>(
         mUi->toolBarMain->widgetForAction(mUi->actionCustomActions));
     customActionsButton->setMenu(mUi->menuCustomActions);
     customActionsButton->setPopupMode(QToolButton::InstantPopup);
 
+#if defined(NDEBUG)
+    setScriptEngineTimeout(std::chrono::seconds(1));
+#endif
     qApp->installEventFilter(this);
 
     mUi->actionPasteInNewEditor->setEnabled(
         mEditorManager.canPasteInNewEditor());
 
+    auto syncIntervalActionGroup = new QActionGroup(this);
+    connect(syncIntervalActionGroup, &QActionGroup::triggered, [](QAction *a) {
+        Singletons::settings().setSyncInterval(a->data().toInt());
+    });
+    auto i = 0;
+    for (const auto &text : {
+             tr("Free Run"),
+             tr("Every V-Sync"),
+             tr("Every 2nd V-Sync"),
+             tr("Every 3rd V-Sync"),
+             tr("Every 4th V-Sync"),
+         }) {
+        auto action = mUi->menuSyncInterval->addAction(text);
+        action->setData(i);
+        action->setCheckable(true);
+        action->setChecked(i == settings.syncInterval());
+        action->setActionGroup(syncIntervalActionGroup);
+        if (i == 0)
+            mUi->menuSyncInterval->addSeparator();
+        ++i;
+    }
+
     auto indentActionGroup = new QActionGroup(this);
     connect(indentActionGroup, &QActionGroup::triggered, [](QAction *a) {
-        Singletons::settings().setTabSize(a->text().toInt());
+        Singletons::settings().setTabSize(a->data().toInt());
     });
-    for (auto i = 1; i <= 8; i++) {
-        auto action = mUi->menuTabSize->addAction(QString::number(i));
+    for (auto i = 2; i <= 8; i++) {
+        auto action = mUi->menuTabSize->addAction(tr("%1 Spaces").arg(i));
+        action->setData(i);
         action->setCheckable(true);
         action->setChecked(i == settings.tabSize());
         action->setActionGroup(indentActionGroup);
@@ -376,7 +412,6 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     readSettings();
-    settings.applyTheme();
 }
 
 MainWindow::~MainWindow()
@@ -396,7 +431,7 @@ void MainWindow::writeSettings()
     if (!isFullScreen())
         settings.setValue("maximized", isMaximized());
     settings.setValue("fullScreen", isFullScreen());
-    settings.setValue("state", saveState());
+    settings.setValue("state", saveState(MainWindowStateVersion));
     settings.setValue("sessionSplitter", mSessionSplitter->saveState());
 
     auto &fileDialog = Singletons::fileDialog();
@@ -414,20 +449,22 @@ void MainWindow::writeSettings()
 void MainWindow::readSettings()
 {
     auto &settings = Singletons::settings();
+    settings.applyTheme();
+
     if (!restoreGeometry(settings.value("geometry").toByteArray()))
         setGeometry(100, 100, 800, 600);
-    if (settings.value("fullScreen").toBool())
-        setFullScreen(true);
-    else if (settings.value("maximized").toBool())
-        showMaximized();
 
-    // workaround: restore state after geometry is applied, so it is not garbled
-    QTimer::singleShot(1, this, [this]() {
-        const auto &settings = Singletons::settings();
-        restoreState(settings.value("state").toByteArray());
-        mSessionSplitter->restoreState(
-            settings.value("sessionSplitter").toByteArray());
-    });
+    if (settings.value("fullScreen").toBool()) {
+        setFullScreen(true);
+    } else if (settings.value("maximized").toBool()) {
+        showMaximized();
+    } else {
+        show();
+    }
+
+    restoreState(settings.value("state").toByteArray(), MainWindowStateVersion);
+    mSessionSplitter->restoreState(
+        settings.value("sessionSplitter").toByteArray());
 
     Singletons::fileDialog().setDirectory(
         settings.value("lastDirectory").toString());
@@ -481,12 +518,26 @@ void MainWindow::dropEvent(QDropEvent *event)
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     switch (event->type()) {
-    case QEvent::KeyPress:
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonRelease:
+        if (const auto button = static_cast<QMouseEvent *>(event)->button();
+            button == Qt::BackButton || button == Qt::ForwardButton) {
+
+            if (event->type() == QEvent::MouseButtonRelease) {
+                if (button == Qt::BackButton)
+                    mEditorManager.navigateBackward();
+                else
+                    mEditorManager.navigateForward();
+            }
+            return true;
+        }
+        [[fallthrough]];
+
+    case QEvent::KeyPress:
     case QEvent::MouseMove:
-    case QEvent::Wheel:              mLastPressWasAlt = false; break;
-    default:                         break;
+    case QEvent::Wheel:     mLastPressWasAlt = false; break;
+
+    default: break;
     }
     return QMainWindow::eventFilter(watched, event);
 }
@@ -509,6 +560,13 @@ void MainWindow::keyReleaseEvent(QKeyEvent *event)
     mLastPressWasAlt = false;
 
     QMainWindow::keyReleaseEvent(event);
+}
+
+void MainWindow::waitForSync()
+{
+    const auto syncInterval = Singletons::settings().syncInterval();
+    for (auto i = 0; i < syncInterval; ++i)
+        mSyncWindow->update();
 }
 
 void MainWindow::setToolbarIconVisible(QAction *action, bool visible)
@@ -599,6 +657,15 @@ void MainWindow::focusPreviousEditor()
         mSessionEditor->setFocus();
 }
 
+void MainWindow::setDefaultContentsMargins()
+{
+#if defined(_WIN32)
+    setContentsMargins(4, 0, 4, 4);
+#else
+    setContentsMargins(0, 0, 0, 0);
+#endif
+}
+
 void MainWindow::setFullScreen(bool fullScreen)
 {
     if (fullScreen) {
@@ -607,7 +674,7 @@ void MainWindow::setFullScreen(bool fullScreen)
         mFullScreenBar->show();
         updateFileActions();
     } else {
-        setContentsMargins(1, 1, 1, 1);
+        setDefaultContentsMargins();
         mFullScreenBar->hide();
         if (mSingletons->settings().value("maximized").toBool()) {
             showMaximized();
@@ -746,7 +813,7 @@ void MainWindow::openFile()
 
 bool MainWindow::openFile(const QString &fileName_, bool asBinaryFile)
 {
-    const auto fileName = toNativeCanonicalFilePath(fileName_);
+    const auto fileName = toNativeCanonicalAbsoluteFilePath(fileName_);
     if (FileDialog::isSessionFileName(fileName)) {
         if (!openSession(fileName))
             return false;
@@ -924,8 +991,9 @@ void MainWindow::saveSessionState(const QString &sessionFileName)
     auto settings = QSettings(sessionStateFile, QSettings::IniFormat);
 
     // add file items by id (may not have a filename)
+    auto activeActions = QStringList();
     auto openEditors = QStringList();
-    auto filesAdded = QStringList();
+    auto filesAdded = QSet<QString>();
     mSingletons->sessionModel().forEachFileItem([&](const FileItem &item) {
         if (auto editor = mEditorManager.getEditor(item.fileName)) {
             openEditors += QString("%1|%2").arg(item.id).arg(
@@ -936,18 +1004,26 @@ void MainWindow::saveSessionState(const QString &sessionFileName)
 
     // add other editors by relative filename
     mEditorManager.forEachEditor([&](const IEditor &editor) {
-        // not saving/restoring Qml views for now
-        if (FileDialog::getFileExtension(editor.fileName()) == "qml")
+        // obtain filenames of actions to reapply from QmlViews
+        if (auto qmlView = mEditorManager.getQmlView(editor.fileName())) {
+            const auto actionId = qmlView->actionId();
+            if (!actionId.isEmpty() && !activeActions.contains(actionId))
+                activeActions += actionId;
+
+        } else if (FileDialog::getFileExtension(editor.fileName()) == "qml") {
+            // not saving/restoring Qml source editors for now
             return;
+        }
 
         if (!filesAdded.contains(editor.fileName()))
             openEditors += QString("%1|%2").arg(
-                QDir::fromNativeSeparators(
-                    sessionDir.relativeFilePath(editor.fileName())),
+                toForwardSlashRelativeFilePath(editor.fileName()),
                 mEditorManager.getEditorObjectName(&editor));
     });
 
-    settings.setValue("editorState", mEditorManager.saveState());
+    settings.setValue("editorState",
+        mEditorManager.saveState(EditorManagerStateVersion));
+    settings.setValue("activeActions", activeActions);
     settings.setValue("openEditors", openEditors);
     auto &synchronizeLogic = Singletons::synchronizeLogic();
     settings.setValue("evaluationMode",
@@ -963,6 +1039,11 @@ bool MainWindow::restoreSessionState(const QString &sessionFileName)
 
     auto &model = Singletons::sessionModel();
     auto settings = QSettings(sessionStateFile, QSettings::IniFormat);
+
+    const auto activeActions = settings.value("activeActions").toStringList();
+    for (const auto &actionId : activeActions)
+        Singletons::customActions().applyAction(actionId);
+
     const auto openEditors = settings.value("openEditors").toStringList();
     mEditorManager.setAutoRaise(false);
     for (const auto &openEditor : openEditors)
@@ -985,7 +1066,8 @@ bool MainWindow::restoreSessionState(const QString &sessionFileName)
                         editorObjectName);
             }
         }
-    mEditorManager.restoreState(settings.value("editorState").toByteArray());
+    mEditorManager.restoreState(settings.value("editorState").toByteArray(),
+        EditorManagerStateVersion);
     mEditorManager.setAutoRaise(true);
 
     setEvaluationMode(
@@ -1008,6 +1090,8 @@ bool MainWindow::closeSession()
             return false;
     }
 
+    setEvaluationMode(EvaluationMode::Paused);
+    Singletons::synchronizeLogic().resetRenderSession();
     Singletons::synchronizeLogic().handleSessionFileNameChanged("");
     mEditorManager.closeAllEditors(false);
     mOutputWindow->setText("");
@@ -1066,8 +1150,7 @@ void MainWindow::updateRecentFileActions()
                 auto text = action->text();
                 if (text.size() > 100)
                     text = text.replace(45, text.size() - 90, "...  ...");
-                action->setText(
-                    QStringLiteral("  &%1 %2")
+                action->setText(QStringLiteral("  &%1 %2")
                         .arg(QChar(index < 9 ? '1' + index : 'A' + (index - 9)))
                         .arg(text));
                 ++index;
@@ -1115,7 +1198,8 @@ void MainWindow::handleMessageActivated(ItemId itemId, QString fileName,
         mSessionEditor->setCurrentItem(itemId);
         openSessionDock();
     } else if (!fileName.isEmpty()) {
-        Singletons::editorManager().openSourceEditor(fileName, line, column);
+        Singletons::editorManager().openSourceEditor(fileName, false, line,
+            column);
     }
 }
 
@@ -1164,8 +1248,14 @@ void MainWindow::handleThemeChanging(const Theme &theme)
     Singletons::sessionModel().setActiveItemColor(
         theme.getColor(ThemeColor::BuiltinConstant));
 
-    style()->unpolish(qApp);
-    style()->polish(qApp);
+#if defined(_WIN32)
+    // something in qApp->setPalette changes the border color back
+    qApp->processEvents();
+    auto hwnd = reinterpret_cast<void *>(winId());
+    auto dark = theme.isDarkTheme();
+    extern void setWindowBorderTheme(void *hwnd, bool dark);
+    setWindowBorderTheme(hwnd, dark);
+#endif
 }
 
 void MainWindow::handleHideMenuBarChanged(bool hide)
@@ -1252,16 +1342,32 @@ void MainWindow::populateSampleSessions()
 {
     if (!mUi->menuSampleSessions->actions().empty())
         return;
-    const auto entries = enumerateApplicationPaths(SamplesDir, QDir::Dirs);
-    for (const auto &entry : entries) {
-        auto dir = QDir(entry.absoluteFilePath());
-        dir.setNameFilters({ "*.gpjs" });
-        auto sessions = dir.entryInfoList();
-        if (!sessions.empty()) {
-            auto action = mUi->menuSampleSessions->addAction(
-                "&" + entry.fileName(), this, SLOT(openSampleSession()));
-            action->setData(sessions.first().absoluteFilePath());
-        }
+    const auto sampleDirs = enumerateApplicationPaths(SamplesDir, QDir::Dirs);
+    for (const auto &dirInfo : sampleDirs) {
+        const auto addDirs = [this](const auto &addDirs, QMenu &menu,
+                                 const QFileInfo &dirInfo) -> void {
+            auto dir = QDir(dirInfo.absoluteFilePath());
+            dir.setFilter(QDir::Files);
+            dir.setNameFilters({ "*.gpjs" });
+            const auto sessions = dir.entryInfoList();
+            if (!sessions.empty()) {
+                const auto &session = sessions.first();
+                auto action = menu.addAction("&" + dirInfo.fileName(), this,
+                    SLOT(openSampleSession()));
+                action->setData(session.absoluteFilePath());
+            } else {
+                dir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
+                dir.setNameFilters({});
+                auto subMenu =
+                    std::make_unique<QMenu>("&" + dirInfo.fileName());
+                const auto subDirInfos = dir.entryInfoList();
+                for (const auto &subDirInfo : subDirInfos)
+                    addDirs(addDirs, *subMenu, subDirInfo);
+                if (!subMenu->isEmpty())
+                    menu.addMenu(subMenu.release());
+            }
+        };
+        addDirs(addDirs, *mUi->menuSampleSessions, dirInfo);
     }
 }
 

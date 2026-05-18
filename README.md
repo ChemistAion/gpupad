@@ -19,7 +19,7 @@ A lightweight editor for GLSL and HLSL shaders and a fully-featured IDE for deve
 
 ## Features
 
-* OpenGL and Vulkan renderer.
+* OpenGL, Vulkan and Direct3D 12 renderer.
 * Decent source editor with automatic indentation, brace highlighting, rectangular selection&hellip;
 * GLSL, HLSL and JavaScript syntax highlighting with basic auto completion.
 * Possibility to evaluate shader programs with completely customizeable input and render state.
@@ -58,7 +58,7 @@ The session can be evaluated manually *[F6]*, automatically whenever something r
 All items which contributed to the last evaluation are highlighted.
 
 ### Items
-The items of a session pretty much correspond the concepts known from writing OpenGL or Vulkan applications:
+A session is built from the following items:
 
 - **Call** -
 Most prominently are the draw, compute and ray trace calls. Whenever the session is evaluated, all active calls are evaluated in consecutive order. They can be de-/activated using the checkbox.
@@ -82,6 +82,9 @@ Buffer blocks define the structure of a region within a binary. They consist of 
 - **Stream** -
 Serves as the input for vertex shaders. A stream consists of multiple attributes, which get their data from the referenced buffer blocks.
 
+- **Acceleration Structure** -
+Allows to define the instances and geometry for ray tracing calls.
+
 - **Group** -
 Allows to structure more complex sessions. They open a new scope unless *inline scope* is checked. Items within a scope are not visible for items outside the scope (they do not appear in the combo boxes).
 
@@ -90,36 +93,31 @@ Allows to define JavaScript functions and variables in script files, which can s
 Scripts can also be used to dynamically populate the session and generate buffer and texture data.
 There is one JavaScript state for the whole session and the scripts are evaluated in consecutive order (*Group* scopes do not have an effect).
 
-- **Acceleration Structure** -
-Allows to define the instances and geometry for ray tracing calls.
+<img src="docs/session.png">
 
 ## Scripting
 
-Initial documentation of the available script objects:
+<details>
+<summary>Initial documentation of the available script objects.</summary>
 
 :warning: Please use the discussions section for requesting additional information or functionality.
 
 ### App
 
-- `frameIndex: Number`
+- `frame: Number`
+- `time: Number`
+- `timeDelta: Number`
+- `date: [year, month, day, time]` - The current date
 - `keyboard: Keyboard`
 - `mouse: Mouse`
-- `session: Session`
-- `callAction(id, arguments...) -> result`
-- `enumerateFiles(pattern) -> [filename]`
-- `loadLibrary(filename) -> Library?`
-- `openEditor(filename, title?) -> Editor?`
-- `openFileDialog(pattern) -> filename: String?`
-- `readTextFile(filename) -> String?`
-- `writeTextFile(filename, String) -> Bool`
-- `writeBinaryFile(filename, Data) -> Bool`
-
-### Session
-- `name: String`
-- `items: [Item]`
+- `session: Item`
 - `selection: [Item]`
+- `currentEditor - Editor?`
+
+- `clearSession()`
 - `findItem(ItemIdent, origin: ItemIdent?, subItems: Bool?) -> Item?`
 - `findItems(ItemIdent, origin: ItemIdent?, subItems: Bool?) -> [Item]`
+- `trackItems(ItemIdent, origin: ItemIdent?, subItems: Bool?, callback)`
 - `getParentItem(ItemIdent) -> Item?`
 - `insertItem(parent: ItemIdent?, object) -> Item`
 - `insertItemAfter(sibling: ItemIdent, object) -> Item`
@@ -127,18 +125,34 @@ Initial documentation of the available script objects:
 - `deleteItem(ItemIdent)`
 - `clearItems(ItemIdent)`
 - `replaceItems(parent: ItemIdent, [Object])`
-- `openEditor(ItemIdent) -> Editor?`
+- `openEditor(fileName | ItemIdent) -> Editor?`
 - `setBlockData(ItemIdent, Data)`
 - `setBufferData(ItemIdent, Data)`
 - `setScriptSource(ItemIdent, Data)`
 - `setShaderSource(ItemIdent, Data)`
 - `setTextureData(ItemIdent, Data)`
-- `processShader(shader: ItemIdent, type: String) -> String/Data`
+- `processShader(fileName | ItemIdent, processType) -> String/Data`
 - `getBufferHandle(ItemIdent) -> Number`
 - `getTextureHandle(ItemIdent) -> Number`
 
+- `isUntitled(fileName) -> bool`
+- `getFileTitle(fileName) -> String`
+- `callAction(id, arguments...) -> result`
+- `evaluateScript(fileName)`
+- `enumerateFiles(pattern) -> [filename]`
+- `loadLibrary(filename) -> Library?`
+- `saveEditor(filename) -> bool`
+- `openFileDialog(pattern) -> filename: String?`
+- `saveFileDialog(pattern) -> filename: String?`
+- `readTextFile(filename) -> String?`
+- `writeTextFile(filename, String) -> Bool`
+- `writeBinaryFile(filename, Data) -> Bool`
+
 ### Editor
 
+- `type: String`
+- `fileName: String`
+- `title: String`
 - `viewportSize: [width, height]`
 
 ### Mouse
@@ -154,6 +168,8 @@ Initial documentation of the available script objects:
 ### Keyboard
 
 - `keys: [State]` - The state of each key (0 = Up, 1 = Down, 2 = Pressed, -1 = Released).
+
+</details>
 
 ## Installation
 
@@ -174,17 +190,24 @@ It depends on the following libraries, which can be installed using a package ma
 - [Qt6](https://doc.qt.io/qt-6/get-and-install-qt.html)
 - [KDGpu](https://github.com/houmain/KDGpu) (automatically pulled as submodule)
 - [glslang](https://github.com/KhronosGroup/glslang)
-- [spirv-cross](https://github.com/KhronosGroup/SPIRV-Cross)
+- [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)
+- [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools)
 - [libktx](https://github.com/KhronosGroup/KTX-Software)
 - [vulkan-memory-allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+- [Slang](https://https://shader-slang.org)
 - [spdlog](https://github.com/gabime/spdlog)
 - [OpenImageIO](https://github.com/AcademySoftwareFoundation/OpenImageIO) (optional)
 
-### Building on Debian Linux and derivatives:
+### Build instructions:
+<details>
+<summary>On Arch Linux and derivatives</summary>
 
 ```bash
 # install dependencies
-sudo apt install build-essential git cmake qtdeclarative6-dev libdrm-dev pkg-config libxcb*-dev libx11-dev libxrandr-dev
+sudo pacman -S qt6-declarative libdrm vulkan-headers glslang spirv-cross spirv-tools spdlog
+
+# install optional dependencies
+sudo pacman -S qt6-multimedia openimageio
 
 # check out source
 git clone --recurse-submodules https://github.com/houmain/gpupad
@@ -195,18 +218,47 @@ git clone --depth=1 https://github.com/microsoft/vcpkg.git
 vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
 # install additional dependencies using vcpkg
-vcpkg/vcpkg install vulkan "ktx[vulkan]" glslang spirv-cross vulkan-memory-allocator spdlog
+vcpkg/vcpkg install "ktx[vulkan]" vulkan-memory-allocator
+
+# build
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build -j4
+```
+</details>
+
+<details>
+<summary>On Debian Linux and derivatives</summary>
+
+```bash
+# install dependencies
+sudo apt install build-essential git cmake pkg-config qt6-base-dev qt6-declarative-dev libqt6svg6-dev qt6-image-formats-plugins libgl1-mesa-dev libxcb*-dev libx11-dev libxrandr-dev
+
+# install optional dependencies
+sudo apt install qt6-multimedia-dev libopenimageio-dev libopenexr-dev libz-dev openimageio-tools
+
+# check out source
+git clone --recurse-submodules https://github.com/houmain/gpupad
+cd gpupad
+
+# install vcpkg
+sudo apt install curl zip unzip tar
+git clone --depth=1 https://github.com/microsoft/vcpkg.git
+vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+# install additional dependencies using vcpkg
+vcpkg/vcpkg install vulkan "ktx[vulkan]" glslang spirv-cross spirv-tools vulkan-memory-allocator spdlog
 
 # build
 cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
 cmake --build build -j4
 ```
 
-### Building on Windows:
+</details>
+
+<details>
+<summary>On Microsoft Windows</summary>
 
 ```bash
-cmd
-
 # install Qt6
 # https://doc.qt.io/qt-6/get-and-install-qt.html
 
@@ -219,17 +271,20 @@ git clone --depth=1 https://github.com/microsoft/vcpkg.git
 vcpkg\bootstrap-vcpkg -disableMetrics
 
 # install dependencies using vcpkg
-vcpkg\vcpkg install vulkan "ktx[vulkan]" glslang spirv-cross vulkan-memory-allocator spdlog
+vcpkg\vcpkg install vulkan "ktx[vulkan]" glslang spirv-cross spirv-tools vulkan-memory-allocator spdlog directx-dxc
 
-# generate Visual Studio solution
+# generate Visual Studio solution (set correct path to Qt installation)
 cmake -B build -DCMAKE_PREFIX_PATH=C:\Qt\6.9.0\msvc2022_64 -DCMAKE_TOOLCHAIN_FILE=vcpkg\scripts\buildsystems\vcpkg.cmake
 
-# copy all Qt dependencies to Debug directory
-cmake --install build --config Debug --component Application --prefix %CD%\Debug
+# build Debug version and copy all dependencies to build directory
+cmake --build build --config Debug
+cmake --install build --config Debug --component Application --prefix %CD%\build\Debug
 
-# open solution
-build\gpupad.sln
+# open solution (Visual Studio solutions prior to 2026 have .sln extension)
+start build\gpupad.slnx
 ```
+
+</details>
 
 ## License
 

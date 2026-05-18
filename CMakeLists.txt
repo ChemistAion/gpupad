@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
 project(gpupad LANGUAGES CXX C)
+set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+
+set(BUILD_TYPES "Debug" "Release")
+get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(multi_config)
+    set(CMAKE_CONFIGURATION_TYPES "${BUILD_TYPES}" CACHE STRING "list of supported configuration types" FORCE)
+elseif(NOT CMAKE_BUILD_TYPE OR NOT CMAKE_BUILD_TYPE IN_LIST BUILD_TYPES)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+endif()
 
 option(ENABLE_UNITY_BUILD "Enable Unity Build" OFF)
 if (ENABLE_UNITY_BUILD)
@@ -18,12 +27,28 @@ else()
     # use mold linker when available
     find_program(MOLD_PATH NAMES mold)
     if(MOLD_PATH)
+        message(NOTICE "Using mold linker")
         add_link_options(-fuse-ld=mold)
+    endif()
+
+    # use ccache when available
+    find_program(CCACHE_PATH NAMES ccache)
+    if(CCACHE_PATH)
+        message(NOTICE "Using ccache")
+        set(CMAKE_C_COMPILER_LAUNCHER "ccache")
+        set(CMAKE_CXX_COMPILER_LAUNCHER "ccache")
     endif()
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core)
-qt_standard_project_setup()
+
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.3)
+    qt_standard_project_setup()
+else()
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTOUIC ON)
+    include(GNUInstallDirs)
+endif()
 set(CMAKE_AUTORCC ON)
 
 # build KDGpu --------------------
@@ -112,8 +137,8 @@ set(SOURCES
   src/editors/source/SyntaxGLSL.cpp
   src/editors/source/SyntaxHighlighter.cpp
   src/editors/source/SyntaxHLSL.cpp
+  src/editors/source/SyntaxSlang.cpp
   src/editors/source/SyntaxJavaScript.cpp
-  src/editors/texture/GLWidget.cpp
   src/editors/texture/Histogram.cpp
   src/editors/texture/TextureEditor.cpp
   src/editors/texture/TextureEditorToolBar.cpp
@@ -127,6 +152,7 @@ set(SOURCES
   src/render/opengl/GLBuffer.cpp
   src/render/opengl/GLCall.cpp
   src/render/opengl/GLProgram.cpp
+  src/render/opengl/GLProgram_Reflection.cpp
   src/render/opengl/GLShader.cpp
   src/render/opengl/GLStream.cpp
   src/render/opengl/GLTarget.cpp
@@ -135,6 +161,7 @@ set(SOURCES
   src/render/opengl/GLRenderSession.cpp
   src/render/opengl/GLRenderer.cpp
   src/render/opengl/GLComputeRange.cpp
+  src/render/opengl/GLShareSync.cpp
   src/render/vulkan/KDGpuEnums.cpp
   src/render/vulkan/VKBuffer.cpp
   src/render/vulkan/VKCall.cpp
@@ -148,73 +175,116 @@ set(SOURCES
   src/render/vulkan/VKRenderer.cpp
   src/render/vulkan/VKRenderSession.cpp
   src/render/vulkan/VKAccelerationStructure.cpp
+  src/render/vulkan/VKShareSync.cpp
+  src/render/AdapterIdentity.cpp
+  src/render/GLWindow.cpp
   src/render/ProcessSource.cpp
   src/render/RenderTask.cpp
   src/render/RenderSessionBase.cpp
   src/render/ShaderBase.cpp
+  src/render/BufferBase.cpp
+  src/render/PipelineBase.cpp
   src/render/TextureBase.cpp
-  src/render/ShaderPrintf.cpp
-  src/render/Spirv.cpp
-  src/render/SpirvInterface.cpp
+  src/render/PrintfBase.cpp
+  src/render/ShaderCompiler.cpp
+  src/render/ShaderCompiler_glslang.cpp
+  src/render/Reflection.cpp
+  src/render/Reflection_Builder.cpp
+  src/render/Reflection_JSON.cpp
   src/scripting/ScriptEngine.cpp
   src/scripting/ScriptEngine.js
   src/scripting/ScriptSession.cpp
+  src/scripting/ScriptTimeout.cpp
   src/scripting/CustomActions.cpp
   src/scripting/objects/AppScriptObject.cpp
+  src/scripting/objects/AppScriptObject_Session.cpp
   src/scripting/objects/ConsoleScriptObject.cpp
   src/scripting/objects/EditorScriptObject.cpp
   src/scripting/objects/LibraryScriptObject.cpp
   src/scripting/objects/MouseScriptObject.cpp
   src/scripting/objects/KeyboardScriptObject.cpp
-  src/scripting/objects/SessionScriptObject.cpp
-  src/session/AttachmentProperties.cpp
-  src/session/AttachmentProperties.ui
-  src/session/AttributeProperties.ui
-  src/session/BindingProperties.cpp
-  src/session/BindingProperties.ui
-  src/session/BufferProperties.ui
-  src/session/BlockProperties.ui
-  src/session/CallProperties.cpp
-  src/session/CallProperties.ui
-  src/session/ColorMask.cpp
-  src/session/ColorPicker.cpp
-  src/session/FieldProperties.ui
-  src/session/DataComboBox.cpp
+  src/scripting/objects/ItemScriptObject.cpp
   src/session/Item.cpp
-  src/session/ExpressionEditor.cpp
-  src/session/ExpressionMatrix.cpp
-  src/session/ExpressionLineEdit.cpp
-  src/session/GroupProperties.ui
-  src/session/ProgramProperties.ui
-  src/session/ReferenceComboBox.cpp
-  src/session/ScriptProperties.ui
-  src/session/AccelerationStructureProperties.ui
-  src/session/InstanceProperties.ui
-  src/session/GeometryProperties.ui
+  src/resources.qrc
+  src/session/properties/AccelerationStructureProperties.ui
+  src/session/properties/AttachmentProperties.cpp
+  src/session/properties/AttachmentProperties.ui
+  src/session/properties/AttributeProperties.ui
+  src/session/properties/BindingProperties.cpp
+  src/session/properties/BindingProperties.ui
+  src/session/properties/BlockProperties.ui
+  src/session/properties/BufferProperties.ui
+  src/session/properties/CallProperties.cpp
+  src/session/properties/CallProperties.ui
+  src/session/properties/FieldProperties.ui
+  src/session/properties/GeometryProperties.ui
+  src/session/properties/GroupProperties.ui
+  src/session/properties/InstanceProperties.ui
+  src/session/properties/ProgramProperties.ui
+  src/session/properties/PropertiesEditor.cpp
+  src/session/properties/ScriptProperties.ui
+  src/session/properties/SessionProperties.cpp
+  src/session/properties/SessionProperties.ui
+  src/session/properties/ShaderProperties.ui
+  src/session/properties/StreamProperties.ui
+  src/session/properties/TargetProperties.ui
+  src/session/properties/TextureProperties.cpp
+  src/session/properties/TextureProperties.ui
   src/session/SessionEditor.cpp
   src/session/SessionModel.cpp
   src/session/SessionModelCore.cpp
-  src/session/PropertiesEditor.cpp
-  src/resources.qrc
-  src/session/ShaderProperties.ui
-  src/session/StreamProperties.ui
-  src/session/TargetProperties.ui
-  src/session/SessionProperties.cpp
-  src/session/SessionProperties.ui
-  src/session/TextureProperties.cpp
-  src/session/TextureProperties.ui)
+  src/widgets/ColorMask.cpp
+  src/widgets/ColorPicker.cpp
+  src/widgets/DataComboBox.cpp
+  src/widgets/ExpressionEditor.cpp
+  src/widgets/ExpressionLineEdit.cpp
+  src/widgets/ExpressionMatrix.cpp
+  src/widgets/ReferenceComboBox.cpp)
+
+if(WIN32)
+  set(SOURCES ${SOURCES}
+  src/windows/setWindowBorderTheme.cpp
+  src/render/ShaderCompiler_Microsoft.cpp
+  src/render/direct3d/D3DAccelerationStructure.cpp
+  src/render/direct3d/D3DBuffer.cpp
+  src/render/direct3d/D3DCall.cpp
+  src/render/direct3d/D3DEnums.cpp
+  src/render/direct3d/D3DPipeline.cpp
+  src/render/direct3d/D3DProgram.cpp
+  src/render/direct3d/D3DPrintf.cpp
+  src/render/direct3d/D3DShader.cpp
+  src/render/direct3d/D3DShader_Reflection.cpp
+  src/render/direct3d/D3DStream.cpp
+  src/render/direct3d/D3DTarget.cpp
+  src/render/direct3d/D3DTexture.cpp
+  src/render/direct3d/D3DRenderer.cpp
+  src/render/direct3d/D3DRenderSession.cpp
+  src/render/direct3d/D3DShareSync.cpp
+  libs/d3d12/RenderTargetHelper.cpp)
+endif()
 
 file(GLOB_RECURSE HEADERS include src/*.h)
-if(WIN32)
-    set(HEADERS ${HEADERS} src/resources.rc src/qt6.natvis)
-endif()
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES} ${HEADERS})
 
 if (MSVC)
     add_compile_options(/W3)
+
+    set(HEADERS ${HEADERS} src/resources.rc src/qt6.natvis)
+
+    # build binaries in bin directory
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/bin)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/bin)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/bin)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/bin)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/bin)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/bin)
+
+    # make GPUpad the startup project
+    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
 else()
     add_compile_options(-Wall)
 endif()
+
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES} ${HEADERS})
 
 qt_add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -232,7 +302,15 @@ target_include_directories(${PROJECT_NAME} PRIVATE src libs)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(${PROJECT_NAME} PRIVATE GL)
 elseif(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
+    find_package(directx-dxc CONFIG REQUIRED)
+
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+      opengl32
+      d3d11
+      dxgi
+      d3dcompiler
+      Microsoft::DirectXShaderCompiler)
+
 elseif(APPLE)
     find_package(OpenGL REQUIRED)
     include_directories(${OPENGL_INCLUDE_DIR})
@@ -270,14 +348,6 @@ if(ENABLE_QUICK AND Qt6Quick_FOUND AND Qt6QuickWidgets_FOUND)
     endif()
 endif()
 
-# link OpenImageIO
-find_package(OpenImageIO CONFIG)
-option(ENABLE_OPENIMEAGEIO "Enable OpenImageIO" ON)
-if (ENABLE_OPENIMEAGEIO AND OpenImageIO_FOUND)
-    target_link_libraries(${PROJECT_NAME} PRIVATE OpenImageIO::OpenImageIO)
-    add_compile_definitions(OpenImageIO_FOUND)
-endif()
-
 # link glslang
 find_package(glslang CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE glslang::glslang
@@ -287,9 +357,38 @@ target_link_libraries(${PROJECT_NAME} PRIVATE glslang::glslang
 # link SPIRV-Cross
 find_package(spirv_cross_core CONFIG REQUIRED)
 find_package(spirv_cross_glsl CONFIG REQUIRED)
+find_package(spirv_cross_hlsl CONFIG REQUIRED)
 find_package(spirv_cross_reflect CONFIG REQUIRED)
-target_link_libraries(${PROJECT_NAME} 
-    PRIVATE spirv-cross-core spirv-cross-glsl spirv-cross-reflect)
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE spirv-cross-core spirv-cross-glsl spirv-cross-hlsl spirv-cross-reflect)
+
+# link SPIRV-Tools
+find_package(SPIRV-Tools CONFIG REQUIRED)
+find_package(SPIRV-Tools-opt CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE SPIRV-Tools-opt)
+
+# link OpenImageIO
+find_package(OpenImageIO)
+if (OpenImageIO_FOUND)
+    set(ENABLE_OPENIMEAGEIO_DEFAULT TRUE)
+endif()
+option(ENABLE_OPENIMEAGEIO "Enable OpenImageIO" ${ENABLE_OPENIMEAGEIO_DEFAULT})
+if (ENABLE_OPENIMEAGEIO)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenImageIO::OpenImageIO)
+    add_compile_definitions(OpenImageIO_FOUND)
+endif()
+
+# link Slang
+find_package(Slang)
+if (Slang_FOUND)
+    set(ENABLE_SLANG_DEFAULT TRUE)
+endif()
+option(ENABLE_SLANG "Enable Slang" ${ENABLE_SLANG_DEFAULT})
+if (ENABLE_SLANG)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${Slang_LIBRARY})
+    add_compile_definitions(Slang_FOUND)
+endif()
 
 # add custom action projects
 set(ACTIONS
@@ -306,35 +405,36 @@ endforeach()
 set(DOC_FILES LICENSE CHANGELOG.md THIRD-PARTY.md)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME Application)
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
     install(TARGETS ${PROJECT_NAME} DESTINATION "bin")
+    install(FILES extra/bin/gpupad-headless DESTINATION "bin")
     install(FILES ${DOC_FILES} DESTINATION "share/gpupad")
     install(DIRECTORY extra/share DESTINATION .)
     install(DIRECTORY extra/samples DESTINATION "share/gpupad" COMPONENT Samples)
     install(DIRECTORY extra/themes DESTINATION "share/gpupad" COMPONENT Themes)
     install(DIRECTORY extra/actions DESTINATION "share/gpupad" COMPONENT Actions)
     install(DIRECTORY extra/libs DESTINATION "share/gpupad" COMPONENT Actions)
+    install(DIRECTORY extra/qml DESTINATION "share/gpupad" COMPONENT Actions)
     foreach(ACTION ${ACTIONS})
         install(TARGETS ${ACTION} DESTINATION "share/gpupad/actions/${ACTION}" COMPONENT Actions)
     endforeach()
 
 else()
-    install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS ${PROJECT_NAME} DESTINATION "bin")
+    install(FILES extra/bin/gpupad-headless.cmd DESTINATION "bin")
     install(FILES ${DOC_FILES} DESTINATION .)
-    install(DIRECTORY extra/qml DESTINATION .)
     install(DIRECTORY extra/samples DESTINATION . COMPONENT Samples)
     install(DIRECTORY extra/themes DESTINATION . COMPONENT Themes)
     install(DIRECTORY extra/actions DESTINATION . COMPONENT Actions)
     install(DIRECTORY extra/libs DESTINATION . COMPONENT Actions)
+    install(DIRECTORY extra/qml DESTINATION . COMPONENT Actions)
     foreach(ACTION ${ACTIONS})
         install(TARGETS ${ACTION} DESTINATION "actions/${ACTION}" COMPONENT Actions)
     endforeach()
 
     # install Qt dependencies
     set(DEPLOY_TOOL_OPTIONS "--qmldir ${CMAKE_CURRENT_SOURCE_DIR}/extra/qml")
-    if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-        set(DEPLOY_TOOL_OPTIONS ${DEPLOY_TOOL_OPTIONS} --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler)
-    endif()
+    set(DEPLOY_TOOL_OPTIONS ${DEPLOY_TOOL_OPTIONS} --no-opengl-sw --no-system-d3d-compiler --no-system-dxc-compiler)
     qt_generate_deploy_app_script(
         TARGET ${PROJECT_NAME}
         OUTPUT_SCRIPT deploy_script

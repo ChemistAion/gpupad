@@ -3,6 +3,7 @@
 #include "MessageList.h"
 #include <QObject>
 #include <QJSEngine>
+#include <QDir>
 #include <QJSValue>
 #include <vector>
 
@@ -16,14 +17,19 @@ class QTimer;
 class ScriptEngine final : public QObject
 {
 public:
-    static ScriptEnginePtr make(const QString &basePath = "",
-        QThread *thread = nullptr, QObject *parent = nullptr);
+    static void resetFirstError(ItemId itemId);
+    static ScriptEnginePtr make(const QString &actionId,
+        const QString &mainScriptFileName, QThread *thread = nullptr,
+        QObject *parent = nullptr);
+    static ScriptEnginePtr make(const QDir &basePath, QThread *thread = nullptr,
+        QObject *parent = nullptr);
+    static ScriptEnginePtr make(const QString &basePath) = delete;
     ~ScriptEngine();
 
+    [[nodiscard]] std::shared_ptr<void> beginSettingFirstError(ItemId itemId);
     MessagePtrSet resetMessages();
     MessagePtrSet &messages() { return mMessages; }
-    void setOmitReferenceErrors();
-    void setTimeout(int msec);
+    void interrupt();
     void setGlobal(const QString &name, QObject *object);
     void setGlobal(const QString &name, const ScriptValueList &values);
     void validateScript(const QString &script, const QString &fileName);
@@ -37,6 +43,8 @@ public:
     uint32_t evaluateUInt(const QString &valueExpression, ItemId itemId);
     QJSEngine &jsEngine();
 
+    const QString &actionId() const { return mActionId; }
+    const QString &mainScriptFileName() const { return mMainScriptFileName; }
     AppScriptObject &appScriptObject() { return *mAppScriptObject; }
 
     void setGlobal(const QString &name, QJSValue value);
@@ -51,17 +59,17 @@ public:
 
 private:
     ScriptEngine(QObject *parent);
-    void initialize(const ScriptEnginePtr &self, const QString &basePath);
-    void resetInterruptTimer();
+    void initialize(const ScriptEnginePtr &self, const QDir &basePath);
+    [[nodiscard]] std::shared_ptr<void> registerRunning();
     void outputError(const QJSValue &result, ItemId itemId);
 
+    QString mActionId;
+    QString mMainScriptFileName;
     MessagePtrSet mMessages;
     QJSEngine *mJsEngine{};
     ConsoleScriptObject *mConsoleScriptObject{};
     AppScriptObject *mAppScriptObject{};
-    QThread *mInterruptThread{};
-    QTimer *mInterruptTimer{};
-    bool mOmitReferenceErrors{};
+    bool mSettingFirstError{};
 };
 
 void checkValueCount(int valueCount, int offset, int count, ItemId itemId,

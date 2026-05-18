@@ -1,7 +1,6 @@
 #include "TextureEditor.h"
 #include "FileCache.h"
 #include "FileDialog.h"
-#include "GLWidget.h"
 #include "InputState.h"
 #include "Settings.h"
 #include "Singletons.h"
@@ -11,6 +10,7 @@
 #include "TextureInfoBar.h"
 #include "TextureItem.h"
 #include "getEventPosition.h"
+#include "render/GLWindow.h"
 #include "render/opengl/GLContext.h"
 #include "session/Item.h"
 #include <QAction>
@@ -47,13 +47,16 @@ TextureEditor::TextureEditor(QString fileName,
     , mTextureInfoBar(*textureInfoBar)
     , mFileName(fileName)
 {
-    mGLWidget = new GLWidget(this);
-    setViewport(mGLWidget);
-    mTextureItem = new TextureItem(mGLWidget);
-    mTextureBackground = new TextureBackground(mGLWidget);
+    mGLWindow = new GLWindow();
+    mGLWindowContainer = QWidget::createWindowContainer(mGLWindow);
+    mGLWindow->installEventFilter(this);
+    setViewport(mGLWindowContainer);
 
-    connect(mGLWidget, &GLWidget::releasingGL, this, &TextureEditor::releaseGL);
-    connect(mGLWidget, &GLWidget::paintingGL, this, &TextureEditor::paintGL);
+    mTextureItem = new TextureItem(mGLWindow);
+    mTextureBackground = new TextureBackground(mGLWindow);
+
+    connect(mGLWindow, &GLWindow::releasingGL, this, &TextureEditor::releaseGL);
+    connect(mGLWindow, &GLWindow::paintingGL, this, &TextureEditor::paintGL);
 
     setAcceptDrops(false);
     setMouseTracking(true);
@@ -62,7 +65,7 @@ TextureEditor::TextureEditor(QString fileName,
 
 TextureEditor::~TextureEditor()
 {
-    delete mGLWidget;
+    delete mGLWindow;
 
     Singletons::fileCache().invalidateFile(mFileName);
 }
@@ -71,12 +74,13 @@ void TextureEditor::resizeEvent(QResizeEvent *event)
 {
     if (mZoomToFit)
         zoomToFit();
+    updateGeometry();
     updateScrollBars();
 }
 
 void TextureEditor::paintEvent(QPaintEvent *event)
 {
-    mGLWidget->paintEvent(event);
+    mGLWindow->update();
 }
 
 void TextureEditor::releaseGL()
@@ -321,6 +325,33 @@ void TextureEditor::setModified(bool modified)
     }
 }
 
+bool TextureEditor::eventFilter(QObject *watched, QEvent *event)
+{
+    switch (event->type()) {
+    case QEvent::Wheel: wheelEvent(static_cast<QWheelEvent *>(event)); break;
+    case QEvent::MouseButtonDblClick:
+        mouseDoubleClickEvent(static_cast<QMouseEvent *>(event));
+        break;
+    case QEvent::MouseButtonPress:
+        mousePressEvent(static_cast<QMouseEvent *>(event));
+        break;
+    case QEvent::MouseMove:
+        mouseMoveEvent(static_cast<QMouseEvent *>(event));
+        break;
+    case QEvent::MouseButtonRelease:
+        mouseReleaseEvent(static_cast<QMouseEvent *>(event));
+        break;
+    case QEvent::KeyPress:
+        keyPressEvent(static_cast<QKeyEvent *>(event));
+        break;
+    case QEvent::KeyRelease:
+        keyReleaseEvent(static_cast<QKeyEvent *>(event));
+        break;
+    default: break;
+    }
+    return QAbstractScrollArea::eventFilter(watched, event);
+}
+
 void TextureEditor::wheelEvent(QWheelEvent *event)
 {
     setFocus();
@@ -560,7 +591,7 @@ void TextureEditor::updateScrollBars()
     const auto sy = (mZoomToFit ? 0 : std::max(bounds.height() - height, 0.0));
     horizontalScrollBar()->setRange(-sx, sx);
     verticalScrollBar()->setRange(-sy, sy);
-    mGLWidget->update();
+    mGLWindow->requestUpdate();
 }
 
 void TextureEditor::paintGL()

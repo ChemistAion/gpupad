@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Evaluation.h"
-#include "MessageList.h"
 #include "SourceType.h"
 #include "session/Item.h"
 #include <QObject>
@@ -27,6 +25,7 @@ public:
     EvaluationMode evaluationMode() const { return mEvaluationMode; }
     void resetEvaluation();
     void manualEvaluation();
+    void finishEvaluation();
     bool resetRenderSessionInvalidationState();
     void updateEditor(ItemId itemId, bool activated);
 
@@ -38,8 +37,6 @@ public:
     void setCurrentEditorSourceType(SourceType sourceType);
 
     void handleSessionFileNameChanged(const QString &fileName);
-    void handleMouseStateChanged();
-    void handleKeyboardStateChanged();
 
     void evaluateBlockProperties(const Block &block, int *offset,
         int *rowCount);
@@ -49,27 +46,39 @@ public:
         int *layers);
 
 Q_SIGNALS:
+    void waitingForSync();
+    void evaluationModeChanged(EvaluationMode mode);
     void outputChanged(QVariant output);
+    void currentEditorChanged(QString fileName);
+    void itemAdded(const Item* item);
+    void itemModified(const Item* item);
+    void itemRemoved(const Item* item);
 
 private:
     void invalidateRenderSession();
-    void initializeRenderSession();
+    void triggerEvaluation(EvaluationType type, int delayMs = 0);
+    bool initializeRenderSession();
+    void handleItemRenamed(const QModelIndex &index, const QString &prevName);
     void handleItemModified(const QModelIndex &index);
     void handleItemsModified(const QModelIndex &topLeft,
         const QModelIndex &bottomRight, const QVector<int> &roles);
     void handleEditorFileRenamed(const QString &prevFileName,
         const QString &fileName);
+    void handleMouseStateChanged();
+    void handleKeyboardStateChanged();
     void handleViewportSizeChanged(const QString &fileName);
     void handleFileItemFileChanged(const FileItem &item);
-    void handleFileItemRenamed(const FileItem &item);
+    void handleFileItemRenamed(const FileItem &item, const QString &prevName);
     void handleFileChanged(const QString &fileName);
-    void handleItemReordered(const QModelIndex &parent, int first);
-    void handleSessionRendered();
+    void handleItemAdded(const QModelIndex &parent, int first);
+    void handleItemRemoved(const QModelIndex &parent, int first);
     void updateEditors();
     void updateTextureEditor(const Texture &texture, TextureEditor &editor);
     void updateBinaryEditor(const Buffer &buffer, BinaryEditor &editor);
     void handleEvaluateTimout();
     void evaluate(EvaluationType evaluationType);
+    void handlePreparingEvaluation(bool &itemsChanged, EvaluationType &type);
+    void handleEvaluated();
     void processSource();
 
     SessionModel &mModel;
@@ -77,10 +86,11 @@ private:
     QTimer *mUpdateEditorsTimer{};
     QSet<ItemId> mEditorItemsModified;
 
-    QString mSessionFileName;
     QTimer *mEvaluationTimer{};
-    bool mRenderSessionInvalidated{};
+    EvaluationType mPendingEvaluationType{};
     EvaluationMode mEvaluationMode{};
+    bool mRenderSessionInvalidated{};
+    EvaluationType mEvaluationType{};
     bool mValidateSource{};
     QString mCurrentEditorFileName{};
     SourceType mCurrentEditorSourceType{};

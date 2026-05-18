@@ -1,6 +1,6 @@
 #pragma once
 
-#include "VKItem.h"
+#include "VKContext.h"
 #include "render/TextureBase.h"
 
 class VKBuffer;
@@ -12,13 +12,16 @@ public:
     VKTexture(const Buffer &buffer, VKBuffer *textureBuffer,
         Texture::Format format, VKRenderSession &renderSession);
 
+    void boundAsSampler() { addUsage(KDGpu::TextureUsageFlagBits::SampledBit); }
+    void boundAsImage() { addUsage(KDGpu::TextureUsageFlagBits::StorageBit); }
+    void addUsage(KDGpu::TextureUsageFlags usage);
+
     KDGpu::Texture &texture() { return mTexture; }
     KDGpu::TextureLayout currentLayout() const { return mCurrentLayout; }
     KDGpu::TextureAspectFlagBits aspectMask() const;
 
     KDGpu::TextureView &getView(int level = -1, int layer = -1,
         KDGpu::Format format = KDGpu::Format::UNDEFINED);
-    void addUsage(KDGpu::TextureUsageFlags usage);
     bool prepareSampledImage(VKContext &context);
     bool prepareStorageImage(VKContext &context);
     bool prepareAttachment(VKContext &context);
@@ -29,7 +32,8 @@ public:
     bool swap(VKTexture &other);
     bool updateMipmaps(VKContext &context);
     bool deviceCopyModified() const { return mDeviceCopyModified; }
-    bool download(VKContext &context);
+    void beginDownload(VKContext &context);
+    bool finishDownload();
     ShareHandle getSharedMemoryHandle() const;
 
 private:
@@ -57,6 +61,8 @@ private:
     KDGpu::TextureUsageFlags mUsage{};
     ktxVulkanTexture mKtxTexture{};
     KDGpu::Texture mTexture;
+    KDGpu::Texture mResolveTexture;
+    KDGpu::Buffer mDownloadBuffer;
     std::map<ViewOptions, KDGpu::TextureView> mTextureViews;
     KDGpu::TextureLayout mCurrentLayout{};
     KDGpu::AccessFlags mCurrentAccessMask{};

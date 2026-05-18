@@ -1,14 +1,22 @@
 #include "MessageWindow.h"
 #include "FileDialog.h"
 #include "MessageList.h"
+#include "editors/EditorManager.h"
+#include "editors/source/SourceEditor.h"
 #include "Singletons.h"
+#include "WindowTitle.h"
 #include "session/SessionModel.h"
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QStandardItemModel>
 #include <QTimer>
+#include <QToolButton>
+#include <QVBoxLayout>
+#include <QTextStream>
 
-MessageWindow::MessageWindow(QWidget *parent) : QTableWidget(parent)
+MessageWindow::MessageWindow(QWidget *parent)
+    : QTableWidget(parent)
+    , mExportButton(new QToolButton(this))
 {
     connect(this, &MessageWindow::itemActivated, this,
         &MessageWindow::handleItemActivated);
@@ -20,10 +28,10 @@ MessageWindow::MessageWindow(QWidget *parent) : QTableWidget(parent)
     mUpdateItemsTimer->start();
 
     setColumnCount(2);
-    verticalHeader()->setVisible(true);
+    verticalHeader()->setVisible(false);
     horizontalHeader()->setVisible(false);
-    verticalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    verticalHeader()->setDefaultSectionSize(24);
+    verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    verticalHeader()->setDefaultSectionSize(20);
     horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     setEditTriggers(NoEditTriggers);
@@ -37,12 +45,30 @@ MessageWindow::MessageWindow(QWidget *parent) : QTableWidget(parent)
     mInfoIcon = QIcon::fromTheme("dialog-information");
     mWarningIcon = QIcon::fromTheme("dialog-warning");
     mErrorIcon = QIcon::fromTheme("dialog-error");
+
+    mExportButton->setIcon(
+        QIcon(QIcon::fromTheme(QString::fromUtf8("application-exit"))));
+    mExportButton->setToolTip(tr("Export To Editor"));
+    mExportButton->setAutoRaise(true);
+
+    auto header = new QWidget(this);
+    auto headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(4, 4, 4, 4);
+    headerLayout->addWidget(mExportButton);
+    headerLayout->addStretch(1);
+
+    auto titleBar = new WindowTitle();
+    titleBar->setWidget(header);
+    mTitleBar = titleBar;
+
+    connect(mExportButton, &QToolButton::clicked, this,
+        &MessageWindow::exportMessages);
 }
 
 void MessageWindow::updateMessages()
 {
     auto added = false;
-    auto messages = MessageList::messages();
+    auto messages = MessagePtrSet::getAllMessages();
     auto messageIds = QSet<MessageId>();
     for (auto it = messages.begin(); it != messages.end();) {
         const auto &message = **it;
@@ -52,142 +78,21 @@ void MessageWindow::updateMessages()
     }
     removeMessagesExcept(messageIds);
 
-    if (added)
+    if (added) {
+        resizeRowsToContents();
         Q_EMIT messagesAdded();
-
+    }
     mUpdateItemsTimer->start(50);
 }
 
 QIcon MessageWindow::getMessageIcon(const Message &message) const
 {
-    using enum MessageType;
-    switch (message.type) {
-    case UniformNotSet:
-    case UniformComponentMismatch:
-    case ShaderWarning:
-    case ScriptWarning:
-    case TooManyPrintfCalls:       return mWarningIcon;
-
-    case ShaderInfo:
-    case ScriptMessage:
-    case CallDuration:
-    case TotalDuration: return mInfoIcon;
-
-    default: return mErrorIcon;
+    switch (getMessageSeverity(message)) {
+    case MessageSeverity::Error:   return mErrorIcon;
+    case MessageSeverity::Warning: return mWarningIcon;
+    case MessageSeverity::Info:    return mInfoIcon;
     }
-}
-
-QString MessageWindow::getMessageText(const Message &message) const
-{
-    using enum MessageType;
-    switch (message.type) {
-    case None:
-    case ShaderInfo:
-    case ShaderWarning:
-    case ShaderError:
-    case ScriptError:
-    case ScriptWarning:
-    case ScriptMessage: return message.text;
-
-    case OpenGLVersionNotAvailable:
-        return tr("The required OpenGL version %1 is not available")
-            .arg(message.text);
-    case VulkanNotAvailable:
-        return tr("Vulkan is not available")
-            + (!message.text.isEmpty()
-                    ? QStringLiteral(" (%1)").arg(message.text)
-                    : "");
-    case LoadingFileFailed:
-        if (message.text.isEmpty())
-            return tr("No file set");
-        return tr("Loading file '%1' failed")
-            .arg(FileDialog::getFileTitle(message.text));
-    case ConvertingFileFailed:
-        return tr("Converting file '%1' failed")
-            .arg(FileDialog::getFileTitle(message.text));
-    case UnsupportedShaderType:    return tr("Unsupported shader type");
-    case ProgramHasNoShader:       return tr("Program has no shader");
-    case UnsupportedTextureFormat: return tr("Unsupported texture format");
-    case CreatingFramebufferFailed:
-        return tr("Creating framebuffer failed %1").arg(message.text);
-    case CreatingTextureFailed:  return tr("Creating texture failed");
-    case UploadingImageFailed:   return tr("Uploading image failed");
-    case DownloadingImageFailed: return tr("Downloading image failed");
-    case UniformNotSet:          return tr("Uniform '%1' not set").arg(message.text);
-    case BufferNotSet:           return tr("Buffer '%1' not set").arg(message.text);
-    case SamplerNotSet:          return tr("Sampler '%1' not set").arg(message.text);
-    case CantSampleAttachment:
-        return tr("Cannot sample attachment '%1'").arg(message.text);
-    case ImageNotSet: return tr("Image '%1' not set").arg(message.text);
-    case SubroutineNotSet:
-        return tr("Subroutine '%1' not set").arg(message.text);
-    case AttributeNotSet:           return tr("Attribute '%1' not set").arg(message.text);
-    case CallDuration:              return tr("Call took %1").arg(message.text);
-    case TotalDuration:             return tr("Total duration %1").arg(message.text);
-    case CallFailed:                return tr("Call failed: %1").arg(message.text);
-    case ClearingTextureFailed:     return tr("Clearing texture failed");
-    case CopyingTextureFailed:      return tr("Copying texture failed");
-    case SwappingTexturesFailed:    return tr("Swapping textures failed");
-    case SwappingBuffersFailed:     return tr("Swapping buffers failed");
-    case ProgramNotAssigned:        return tr("No program set");
-    case TargetNotAssigned:         return tr("No target set");
-    case IndexBufferNotAssigned:    return tr("No index buffer set");
-    case IndirectBufferNotAssigned: return tr("No indirect buffer set");
-    case AccelerationStructureNotAssigned:
-        return tr("No acceleration structure set");
-    case TextureNotAssigned: return tr("No texture set");
-    case BufferNotAssigned:  return tr("No buffer set");
-    case InvalidSubroutine:
-        return tr("Invalid subroutine '%1'").arg(message.text);
-    case ImageFormatNotBindable: return tr("Image format not bindable");
-    case UniformComponentMismatch:
-        return tr("Uniform component mismatch %1").arg(message.text);
-    case InvalidIncludeDirective: return tr("Invalid #include directive");
-    case IncludableNotFound:
-        return tr("Includable shader '%1' not found").arg(message.text);
-    case RecursiveInclude:
-        return tr("Recursive #include '%1'").arg(message.text);
-    case InvalidAttribute: return tr("Invalid stream attribute");
-    case InvalidIndexType:
-        return tr("Invalid index type (%1)").arg(message.text);
-    case InvalidIndirectStride:
-        return tr("Invalid indirect stride (%1)").arg(message.text);
-    case InvalidGeometryStride:
-        return tr("Invalid geometry stride (%1)").arg(message.text);
-    case InvalidShaderTypeForCall: return tr("Invalid shader type for call");
-    case CountExceeded:
-        return tr("Maximum count exceeded (%1)").arg(message.text);
-    case TooManyPrintfCalls: return tr("Too many printf calls");
-    case RenderingFailed:    return tr("Rendering failed: %1").arg(message.text);
-    case MoreThanOneDepthStencilAttachment:
-        return tr("Only a single depth or stencil attachment is supported");
-    case IncompatibleBindings:
-        return tr("Incompatible assignment to the same set/binding %1")
-            .arg(message.text);
-    case CreatingPipelineFailed: return tr("Creating pipeline failed");
-    case OpenGLRendererRequiresGLSL:
-        return tr("The OpenGL driver can only compile GLSL shaders");
-    case OpenGLRequiresCombinedTextureSamplers:
-        return tr("OpenGL requires combined texture/samplers");
-    case SubroutinesNotAvailableInVulkan:
-        return tr("Subroutines not available in Vulkan");
-    case SampleCountMismatch:
-        return tr("Sample count of attachments does not match");
-    case MaxSampleCountExceeded:
-        return tr("Maximum sample count exceeded (%1)").arg(message.text);
-    case MaxPushConstantSizeExceeded:
-        return tr("Maximum push constant size exceeded (%1)").arg(message.text);
-    case MaxVariableBindGroupEntriesExceeded:
-        return tr("Maximum variable binding group entries exceeded (%1)")
-            .arg(message.text);
-    case OnlyLastBindingMayBeUnsizedArray:
-        return tr("Only the last binding may be an unsized array (%1)").arg(message.text);
-    case TextureBuffersNotAvailable:
-        return tr("Texture buffers not available in Vulkan yet");
-    case RayTracingNotAvailable:  return tr("Raytracing not available");
-    case MeshShadersNotAvailable: return tr("Mesh Shaders not available");
-    }
-    return message.text;
+    return {};
 }
 
 QString MessageWindow::getLocationText(const Message &message) const
@@ -255,4 +160,21 @@ void MessageWindow::handleItemActivated(QTableWidgetItem *messageItem)
         line = match.capturedView(1).toInt();
 
     Q_EMIT messageActivated(itemId, fileName, line, -1);
+}
+
+void MessageWindow::exportMessages()
+{
+    auto string = QString();
+    auto out = QTextStream(&string);
+    for (auto row = 0; row < rowCount(); ++row)
+        out << item(row, 0)->text() << "\t" << item(row, 1)->text() << "\n";
+
+    auto editor =
+        Singletons::editorManager().getSourceEditor(mLastExportFileName);
+    if (!editor)
+        mLastExportFileName =
+            FileDialog::generateNextUntitledFileName("Messages");
+    editor = Singletons::editorManager().openSourceEditor(mLastExportFileName);
+    if (editor)
+        editor->replace(string);
 }

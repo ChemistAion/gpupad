@@ -2,16 +2,16 @@
 #include "ScriptEngine.h"
 #include "scripting/IScriptRenderSession.h"
 #include "objects/AppScriptObject.h"
-#include "objects/SessionScriptObject.h"
 #include "Singletons.h"
+#include "FileDialog.h"
 
 ScriptSession::ScriptSession(IScriptRenderSession *renderSession,
     QObject *parent)
     : QObject(parent)
     , mRenderSession(*renderSession)
 {
-    mScriptEngine = ScriptEngine::make(mRenderSession.basePath(),
-        mRenderSession.renderThread());
+    mScriptEngine =
+        ScriptEngine::make(QDir::current(), mRenderSession.renderThread());
 }
 
 void ScriptSession::resetEngine()
@@ -24,7 +24,6 @@ void ScriptSession::beginSessionUpdate()
 {
     Q_ASSERT(!onMainThread());
     mScriptEngine->appScriptObject()
-        .sessionScriptObject()
         .beginBackgroundUpdate(&mRenderSession);
 }
 
@@ -38,7 +37,6 @@ void ScriptSession::endSessionUpdate()
 {
     Q_ASSERT(onMainThread());
     mScriptEngine->appScriptObject()
-        .sessionScriptObject()
         .endBackgroundUpdate();
 }
 

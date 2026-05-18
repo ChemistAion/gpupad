@@ -1,6 +1,6 @@
+#pragma once
 
 #include "render/Renderer.h"
-#include <QObject>
 #include <QThread>
 
 class GLRenderer : public QObject, public Renderer
@@ -12,6 +12,7 @@ public:
 
     void render(RenderTask *task) override;
     void release(RenderTask *task) override;
+    void finish() override;
     QThread* renderThread() override { return &mThread; }
 
 Q_SIGNALS:

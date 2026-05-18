@@ -8,16 +8,29 @@ ConsoleScriptObject::ConsoleScriptObject(MessagePtrSet *messages,
 {
 }
 
-void ConsoleScriptObject::setFileName(const QString &fileName)
+std::shared_ptr<void> ConsoleScriptObject::pushState()
 {
-    mFileName = fileName;
-    mItemId = {};
+    return std::shared_ptr<void>(nullptr,
+        [this, fileName = mFileName, itemId = mItemId](void *) {
+            mFileName = fileName;
+            mItemId = itemId;
+        });
 }
 
-void ConsoleScriptObject::setItemId(ItemId itemId)
+std::shared_ptr<void> ConsoleScriptObject::setFileName(const QString &fileName)
 {
+    auto state = pushState();
+    mFileName = fileName;
+    mItemId = {};
+    return state;
+}
+
+std::shared_ptr<void> ConsoleScriptObject::setItemId(ItemId itemId)
+{
+    auto state = pushState();
     mItemId = itemId;
     mFileName.clear();
+    return state;
 }
 
 void ConsoleScriptObject::output(QString message, int level)
@@ -29,8 +42,5 @@ void ConsoleScriptObject::output(QString message, int level)
     const auto messageType = (level == 2 ? MessageType::ScriptError
             : level == 1                 ? MessageType::ScriptWarning
                                          : MessageType::ScriptMessage);
-
-    mMessages += (!mFileName.isEmpty()
-            ? MessageList::insert(mFileName, 0, messageType, message, false)
-            : MessageList::insert(mItemId, messageType, message, false));
+    mMessages.insert(mItemId, messageType, message, mFileName, 0, false);
 }

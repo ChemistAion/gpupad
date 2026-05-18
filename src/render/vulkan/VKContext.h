@@ -4,7 +4,7 @@
 
 // added because of memset in bind_group_description.h
 #if defined(__GNUC__)
-# pragma GCC diagnostic ignored "-Wclass-memaccess"
+#  pragma GCC diagnostic ignored "-Wclass-memaccess"
 #endif
 
 // still missing declaration in KDGpu/texture_view.h?
@@ -14,7 +14,6 @@ namespace KDGpu {
 }
 struct ktxVulkanDeviceInfo;
 
-#include "session/Item.h"
 #include <KDGpu/acceleration_structure.h>
 #include <KDGpu/bind_group.h>
 #include <KDGpu/bind_group_layout_options.h>
@@ -32,6 +31,12 @@ struct ktxVulkanDeviceInfo;
 #include <KDGpu/texture_options.h>
 #include <KDGpu/texture_view.h>
 #include <KDGpu/vulkan/vulkan_graphics_api.h>
+#include "KDGpuEnums.h"
+#include "VKRenderSession.h"
+#include "FileCache.h"
+#include "FileDialog.h"
+#include "MessageList.h"
+#include "Singletons.h"
 
 struct VKContext
 {
@@ -40,7 +45,7 @@ struct VKContext
     ktxVulkanDeviceInfo &ktxDeviceInfo;
     std::vector<KDGpu::CommandBuffer> commandBuffers;
     std::optional<KDGpu::CommandRecorder> commandRecorder;
-    std::map<ItemId, KDGpu::TimestampQueryRecorder> timestampQueries;
+    std::vector<KDGpu::Buffer> stagingBuffers;
 
     const KDGpu::AdapterFeatures &features() const
     {

@@ -1,9 +1,10 @@
 
 #include "ShaderBase.h"
+#include "Reflection.h"
 #include "FileCache.h"
 #include "FileDialog.h"
 #include "Singletons.h"
-#include "Spirv.h"
+#include "ShaderCompiler.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -64,7 +65,7 @@ namespace {
         const auto match = regex.match(source);
         const auto position = (match.hasMatch() ? match.capturedStart() : 0);
         const auto lineNo = countLines(source, position);
-        source.insert(position, text + QString("#line %1 0\n").arg(lineNo));
+        source.insert(position, text + QString("#line %1\n").arg(lineNo));
     }
 
     QString substituteIncludes(QString source, const QString &fileName,
@@ -75,7 +76,7 @@ namespace {
         if (usedFileNames && !usedFileNames->contains(fileName)) {
             usedFileNames->append(fileName);
         } else if (recursionDepth++ > 3) {
-            messages += MessageList::insert(fileName, 0,
+            messages.insert(fileName, 0,
                 MessageType::RecursiveInclude, fileName);
             return {};
         }
@@ -120,15 +121,17 @@ namespace {
                     source.insert(match.capturedStart(), includableSource);
                     linesInserted += countLines(includableSource) - 1;
                 } else {
-                    messages += MessageList::insert(fileName, lineNo,
+                    messages.insert(fileName, lineNo,
                         MessageType::IncludableNotFound, include);
                 }
             } else {
-                messages += MessageList::insert(fileName, lineNo,
+                messages.insert(fileName, lineNo,
                     MessageType::InvalidIncludeDirective, fileName);
             }
         }
-        return QString("#line %1 %2\n").arg(versionRemoved ? 2 : 1).arg(fileNo)
+        return QString("#line %1 %2\n")
+                   .arg(versionRemoved ? 2 : 1)
+                   .arg(fileNo ? QString::number(fileNo) : "")
             + source;
     }
 
@@ -186,13 +189,14 @@ namespace {
         return completeFunctionName(source, prefix);
     }
 
-    QString getEntryPoint(const QString &entryPoint, Shader::Language language,
-        Shader::ShaderType shaderType, const QString &source)
+    QString getEntryPoint(const QString &entryPoint,
+        Session::ShaderLanguage language, Shader::ShaderType shaderType,
+        const QString &source)
     {
         if (!entryPoint.isEmpty())
             return entryPoint;
 
-        if (language == Shader::Language::HLSL)
+        if (language == Session::ShaderLanguage::HLSL)
             if (auto found = findHLSLEntryPoint(shaderType, source);
                 !found.isEmpty())
                 return found;
@@ -220,14 +224,11 @@ QString resolveIncludePath(const QString &currentFile, const QString &relative,
 
 bool shaderSessionSettingsDiffer(const Session &a, const Session &b)
 {
-    const auto shaderCompilerSettings = [](const Session &a) {
-        return std::tie(a.autoMapBindings, a.autoMapLocations,
-            a.autoSampledTextures, a.vulkanRulesRelaxed, a.spirvVersion);
-    };
     const auto hasShaderCompiler =
-        (!a.shaderCompiler.isEmpty() || a.renderer == "Vulkan");
+        (a.shaderCompiler != Session::ShaderCompiler::Driver
+            || a.renderer == Session::Renderer::Vulkan);
     if (hasShaderCompiler
-        && shaderCompilerSettings(a) != shaderCompilerSettings(b))
+        && a.shaderCompilerSettings != b.shaderCompilerSettings)
         return true;
 
     const auto common = [](const Session &a) {
@@ -250,20 +251,19 @@ ShaderBase::ShaderBase(Shader::ShaderType type,
     for (const Shader *shader : shaders) {
         auto source = QString();
         if (!Singletons::fileCache().getSource(shader->fileName, &source))
-            mMessages += MessageList::insert(shader->id,
+            mMessages.insert(shader->id,
                 MessageType::LoadingFileFailed, shader->fileName);
 
         mFileNames += shader->fileName;
         mSources += source + "\n";
-        mLanguage = shader->language;
         if (!shader->entryPoint.isEmpty())
             mEntryPoint = shader->entryPoint;
         appendLines(mPreamble, shader->preamble);
         appendLines(mIncludePaths, shader->includePaths);
     }
 
-    mEntryPoint =
-        getEntryPoint(mEntryPoint, mLanguage, mType, mSources.first());
+    mEntryPoint = getEntryPoint(mEntryPoint, mSession.shaderLanguage, mType,
+        mSources.first());
 }
 
 bool ShaderBase::operator==(const ShaderBase &rhs) const
@@ -273,26 +273,43 @@ bool ShaderBase::operator==(const ShaderBase &rhs) const
         return false;
 
     const auto tie = [](const ShaderBase &a) {
-        return std::tie(a.mType, a.mSources, a.mFileNames, a.mLanguage,
-            a.mEntryPoint, a.mPreamble, a.mIncludePaths);
+        return std::tie(a.mType, a.mSources, a.mFileNames, a.mEntryPoint,
+            a.mPreamble, a.mIncludePaths);
     };
     return tie(*this) == tie(rhs);
 }
 
 QStringList ShaderBase::preprocessorDefinitions() const
 {
-    return { "GPUPAD 1" };
+    auto definitions = QStringList();
+    definitions.append("GPUPAD 1");
+    switch (mSession.shaderCompiler) {
+    case Session::ShaderCompiler::Driver: break;
+    case Session::ShaderCompiler::glslang:
+        definitions.append("GPUPAD_GLSLANG 1");
+        break;
+    case Session::ShaderCompiler::D3DCompiler:
+        definitions.append("GPUPAD_D3DCOMPILER 1");
+        break;
+    case Session::ShaderCompiler::DXC:
+        definitions.append("GPUPAD_DXC 1");
+        break;
+    case Session::ShaderCompiler::Slang:
+        definitions.append("GPUPAD_SLANG 1");
+        break;
+    }
+    return definitions;
 }
 
-QStringList ShaderBase::getPatchedSources(ShaderPrintf &printf,
+QStringList ShaderBase::getPatchedSources(PrintfBase &printf,
     QStringList *usedFileNames)
 {
-    return (mLanguage == Shader::Language::HLSL
+    return (mSession.shaderLanguage == Session::ShaderLanguage::HLSL
             ? getPatchedSourcesHLSL(printf, usedFileNames)
             : getPatchedSourcesGLSL(printf, usedFileNames));
 }
 
-QStringList ShaderBase::getPatchedSourcesGLSL(ShaderPrintf &printf,
+QStringList ShaderBase::getPatchedSourcesGLSL(PrintfBase &printf,
     QStringList *usedFileNames)
 {
     if (mSources.isEmpty())
@@ -310,16 +327,20 @@ QStringList ShaderBase::getPatchedSourcesGLSL(ShaderPrintf &printf,
         sources[i] = printf.patchSource(mType, mFileNames[i], sources[i]);
 
     if (printf.isUsed(mType)) {
-        const auto explicitBinding = (mSession.renderer == "Vulkan");
+        const auto explicitBinding =
+            (mSession.renderer == Session::Renderer::Vulkan);
         const auto set = (explicitBinding ? 4 : -1);
         const auto binding = (explicitBinding ? 8 : -1);
         insertAfterExtensions(sources.front(),
-            ShaderPrintf::preambleGLSL(set, binding));
-        maxVersion = std::max(maxVersion, ShaderPrintf::requiredVersionGLSL());
+            PrintfBase::preambleGLSL(set, binding));
+        maxVersion = std::max(maxVersion, PrintfBase::requiredVersionGLSL());
     }
 
-    if (!mPreamble.isEmpty())
-        sources.front().prepend("#line 1 0\n" + mPreamble + "\n");
+    if (!mPreamble.isEmpty()) {
+        const auto preamble = substituteIncludes(mPreamble, mFileNames.front(),
+            usedFileNames, mItemId, mMessages, mIncludePaths);
+        sources.front().prepend("#line 1\n" + preamble + "\n");
+    }
 
     const auto definitions = preprocessorDefinitions();
     for (const auto &definition : definitions)
@@ -339,7 +360,7 @@ QStringList ShaderBase::getPatchedSourcesGLSL(ShaderPrintf &printf,
     return sources;
 }
 
-QStringList ShaderBase::getPatchedSourcesHLSL(ShaderPrintf &printf,
+QStringList ShaderBase::getPatchedSourcesHLSL(PrintfBase &printf,
     QStringList *usedFileNames)
 {
     if (mSources.isEmpty())
@@ -359,7 +380,7 @@ QStringList ShaderBase::getPatchedSourcesHLSL(ShaderPrintf &printf,
         sources[i] = printf.patchSource(mType, mFileNames[i], sources[i]);
 
     if (printf.isUsed(mType))
-        sources.front().prepend(ShaderPrintf::preambleHLSL());
+        sources.front().prepend(PrintfBase::preambleHLSL());
 
     if (!mPreamble.isEmpty())
         sources.front().prepend("#line 1\n" + mPreamble + "\n");
@@ -371,12 +392,11 @@ QStringList ShaderBase::getPatchedSourcesHLSL(ShaderPrintf &printf,
     return sources;
 }
 
-Spirv::Input ShaderBase::getSpirvCompilerInput(ShaderPrintf &printf)
+ShaderCompiler::Input ShaderBase::getShaderCompilerInput(PrintfBase &printf)
 {
     auto usedFileNames = QStringList();
     auto patchedSources = getPatchedSources(printf, &usedFileNames);
-    return Spirv::Input{
-        mLanguage,
+    return ShaderCompiler::Input{
         mType,
         patchedSources,
         usedFileNames,
@@ -386,11 +406,43 @@ Spirv::Input ShaderBase::getSpirvCompilerInput(ShaderPrintf &printf)
     };
 }
 
-Spirv ShaderBase::compileSpirv(ShaderPrintf &printf)
+bool ShaderBase::validate()
 {
-    auto input = getSpirvCompilerInput(printf);
-    auto stages = Spirv::compile(mSession, { input }, mItemId, mMessages);
+    const auto spirv = compileSpirv();
+    return !spirv.empty();
+}
+
+Reflection ShaderBase::getReflection()
+{
+    return Reflection(compileSpirv());
+}
+
+Spirv ShaderBase::compileSpirv(PrintfBase &printf)
+{
+    auto input = getShaderCompilerInput(printf);
+    auto stages =
+        ShaderCompiler::compileSpirv(mSession, { input }, mItemId, mMessages);
     return stages[mType];
+}
+
+Spirv ShaderBase::compileSpirv()
+{
+    auto printf = RemoveShaderPrintf();
+    return compileSpirv(printf);
+}
+
+QString ShaderBase::generateGLSL()
+{
+    return ShaderCompiler::generateGLSL(compileSpirv(), mItemId, mMessages);
+}
+
+QString ShaderBase::generateHLSL()
+{
+    return ShaderCompiler::generateHLSL(compileSpirv(), mItemId, mMessages);
+}
+QString ShaderBase::disassemble()
+{
+    return ShaderCompiler::disassemble(compileSpirv());
 }
 
 QString ShaderBase::preprocess()
@@ -398,25 +450,8 @@ QString ShaderBase::preprocess()
     auto usedFileNames = QStringList();
     auto printf = RemoveShaderPrintf();
     auto patchedSources = getPatchedSources(printf, &usedFileNames);
-    return Spirv::preprocess(mSession, mLanguage, mType, patchedSources,
+    return ShaderCompiler::preprocess(mSession, mType, patchedSources,
         usedFileNames, mEntryPoint, mItemId, mIncludePaths, mMessages);
-}
-
-QString ShaderBase::generateReadableSpirv()
-{
-    auto printf = RemoveShaderPrintf();
-    return Spirv::disassemble(compileSpirv(printf));
-}
-
-QVariant ShaderBase::generateBinarySpirv()
-{
-    auto printf = RemoveShaderPrintf();
-    const auto spirv = compileSpirv(printf);
-    if (!spirv)
-        for (auto message : resetMessages())
-            return message->text;
-    return QByteArray(reinterpret_cast<const char *>(spirv.spirv().data()),
-        spirv.spirv().size() * sizeof(uint32_t));
 }
 
 QString ShaderBase::generateGLSLangAST()
@@ -424,14 +459,6 @@ QString ShaderBase::generateGLSLangAST()
     auto usedFileNames = QStringList();
     auto printf = RemoveShaderPrintf();
     auto patchedSources = getPatchedSources(printf, &usedFileNames);
-    return Spirv::generateAST(mSession, mLanguage, mType, patchedSources,
+    return ShaderCompiler::generateAST(mSession, mType, patchedSources,
         usedFileNames, mEntryPoint, mItemId, mIncludePaths, mMessages);
-}
-
-QString ShaderBase::getJsonInterface()
-{
-    auto printf = RemoveShaderPrintf();
-    const auto spirv = compileSpirv(printf);
-    const auto interface = Spirv::Interface(spirv.spirv());
-    return getJsonString(*interface);
 }
