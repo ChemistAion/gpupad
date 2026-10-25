@@ -64,6 +64,17 @@ models when necessary. Failed queries report their HRESULT instead of implying
 support. These diagnostics do not change shader profiles or rendering behavior.
 They are also available through `app.messages` and headless `--verbose` output.
 
+For Direct3D with DXC, **Session → Shader Compiler Settings → Shader Model**
+selects an optional shader-model version. **Default (per stage)** retains
+SM 6.0 for ordinary stages, 6.3 for ray libraries and 6.5 for mesh/task shaders.
+An explicit version applies to both DXIL and its auxiliary SPIR-V reflection
+compile; the stage prefix (`cs`, `lib`, etc.) is selected automatically. Requests
+below a stage's minimum are errors, not silently raised. Compiler/device support
+is required independently; the selector does not certify every listed version.
+The setting is stored as `shaderCompilerSettings.shaderModel`, e.g. `"6.5"`;
+an absent or empty value preserves existing behavior. Other renderers and the
+legacy D3DCompiler keep their current behavior.
+
 ### Items
 A session is built from the following items:
 
