@@ -58,7 +58,8 @@
             { "type": "Field", "id": 92, "name": "OriginHitT", "dataType": "Float", "count": 4 },
             { "type": "Field", "id": 93, "name": "DirectionMin", "dataType": "Float", "count": 4 },
             { "type": "Field", "id": 94, "name": "Sphere", "dataType": "Float", "count": 4 },
-            { "type": "Field", "id": 95, "name": "State", "dataType": "Float", "count": 4 }
+            { "type": "Field", "id": 95, "name": "State", "dataType": "Float", "count": 4 },
+            { "type": "Field", "id": 96, "name": "Outcome", "dataType": "Uint32", "count": 4 }
           ]
         }
       ]

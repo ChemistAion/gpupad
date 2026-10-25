@@ -26,6 +26,13 @@ The fifth row (case4, sphere-center origin) is the first focused diagnostic.
 Zero invoked means no intersection callback was recorded. A changed pattern
 with diagnostics is evidence to investigate, not proof of a numerical fix.
 
+The callback run left seven numeric mismatches (cases8,15–20), with valid
+pipeline sphere hits. Outcome adds four uints per case: Miss callback ran,
+raw payload immediately after TraceRay, raw value after the inline query,
+and the pipeline Boolean used by the board. Read Outcome for case15 (16th row)
+to distinguish a pipeline miss from return-state/Boolean corruption. Case records
+are now80 bytes; Results/Ray remains16 bytes per row. No solver/flag change.
+
 Both methods trace the same FP32 finite segment, mask0xff and opaque unit sphere.
 The pipeline skips closest-hit; inline traversal handles procedural candidates
 explicitly and never accepts their AABB as a surface hit. Both call SphereHit,

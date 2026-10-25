@@ -7,6 +7,8 @@ struct PipelineState {
     float4 Sphere;
     // invoked, solver hit, pre-ReportHit TMax, ReportHit result (-1 = not returned)
     float4 State;
+    // Miss callback, raw payload before/after inline, final pipeline Boolean.
+    uint4 Outcome;
 };
 
 globallycoherent RWStructuredBuffer<PipelineState> PipelineDiagnostics : register(u2);

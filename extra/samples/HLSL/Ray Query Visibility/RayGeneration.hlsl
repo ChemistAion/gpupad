@@ -7,13 +7,14 @@ StructuredBuffer<float4> Spheres : register(t1);
 RWTexture2D<float4> OutputImage : register(u0);
 RWStructuredBuffer<uint4> Results : register(u1);
 
-bool PipelineBlocked(RayDesc ray)
+bool PipelineBlocked(RayDesc ray, out uint rawBlocked)
 {
     VisibilityPayload payload;
     payload.Blocked = 1u;
     TraceRay(Scene, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
         | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 0, ray, payload);
-    return payload.Blocked != 0u;
+    rawBlocked = payload.Blocked;
+    return rawBlocked != 0u;
 }
 
 bool InlineBlocked(RayDesc ray)
@@ -50,8 +51,14 @@ void RayGeneration()
     initialState.State.w = -1.0;
     PipelineDiagnostics[index] = initialState;
     DeviceMemoryBarrier();
-    const bool pipeline = PipelineBlocked(ray);
+    uint rawBlocked;
+    const bool pipeline = PipelineBlocked(ray, rawBlocked);
+    DeviceMemoryBarrier();
+    PipelineDiagnostics[index].Outcome.y = rawBlocked;
+    DeviceMemoryBarrier();
     const bool inlineHit = InlineBlocked(ray);
+    PipelineDiagnostics[index].Outcome.z = rawBlocked;
+    PipelineDiagnostics[index].Outcome.w = uint(pipeline);
 
     // Simple reference cases also catch a broken all-miss setup.
     static const uint expected[8] = { 1u, 0u, 0u, 1u, 1u, 1u, 1u, 1u };

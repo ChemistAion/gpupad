@@ -14,7 +14,7 @@ void RayIntersection()
     float t;
     const bool found = SphereHit(sphere, origin, direction, tMin, tMax, t);
     const uint index = DispatchRaysIndex().y * 6u + DispatchRaysIndex().x;
-    PipelineState diagnostic;
+    PipelineState diagnostic = (PipelineState)0;
     diagnostic.OriginHitT = float4(origin, t);
     diagnostic.DirectionMin = float4(direction, tMin);
     diagnostic.Sphere = sphere;
