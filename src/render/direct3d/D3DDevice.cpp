@@ -124,7 +124,7 @@ void D3DDevice::reportCapabilities()
     mMessages.insert(MessageType::DeviceInfo,
         QStringLiteral("Direct3D12 capabilities\nDXR tier (OPTIONS5): %1\n"
                        "Highest device shader model: %2 (query ceiling %3)")
-            .arg(queryRaytracingTier(*mDevice), queryShaderModel(*mDevice),
+            .arg(queryRaytracingTier(*mDevice.Get()), queryShaderModel(*mDevice.Get()),
                 shaderModelName(D3D_HIGHEST_SHADER_MODEL)));
 }
 
