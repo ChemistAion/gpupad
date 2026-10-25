@@ -76,4 +76,3 @@ static const uint4 RayDirections[36] = {
     uint4(0x00000000u, 0x00000000u, 0x3f800000u, 0x41200000u),
     uint4(0x00000000u, 0x00000000u, 0x3f800000u, 0x40800001u)
 };
-
