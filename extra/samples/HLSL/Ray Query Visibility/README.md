@@ -31,7 +31,14 @@ pipeline sphere hits. Outcome adds four uints per case: Miss callback ran,
 raw payload immediately after TraceRay, raw value after the inline query,
 and the pipeline Boolean used by the board. Read Outcome for case15 (16th row)
 to distinguish a pipeline miss from return-state/Boolean corruption. Case records
-are now80 bytes; Results/Ray remains16 bytes per row. No solver/flag change.
+were80 bytes; Results/Ray remains16 bytes per row. No solver/flag change.
+
+The R1 instrumented control adds Witness: payload before TraceRay, payload
+immediately after TraceRay, original direction.z bits, reserved. Records are
+96 bytes. Callback stores preserve these raygen-owned fields and use explicit
+device barriers. The executed R1 control still has seven disagreements;
+Before is1 in all36 cases, while all28 solver-hit payloads return direction.z
+bits instead of integer1. This is diagnostic evidence, not an accepted repair.
 
 Both methods trace the same FP32 finite segment, mask0xff and opaque unit sphere.
 The pipeline skips closest-hit; inline traversal handles procedural candidates

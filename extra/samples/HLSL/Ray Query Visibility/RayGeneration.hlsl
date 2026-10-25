@@ -11,9 +11,15 @@ bool PipelineBlocked(RayDesc ray, out uint rawBlocked)
 {
     VisibilityPayload payload;
     payload.Blocked = 1u;
+    const uint index = DispatchRaysIndex().y * 6u + DispatchRaysIndex().x;
+    PipelineDiagnostics[index].Witness.x = payload.Blocked;
+    PipelineDiagnostics[index].Witness.z = asuint(ray.Direction.z);
+    DeviceMemoryBarrier();
     TraceRay(Scene, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
         | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 0, ray, payload);
     rawBlocked = payload.Blocked;
+    PipelineDiagnostics[index].Witness.y = payload.Blocked;
+    DeviceMemoryBarrier();
     return rawBlocked != 0u;
 }
 

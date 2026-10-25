@@ -9,6 +9,8 @@ struct PipelineState {
     float4 State;
     // Miss callback, raw payload before/after inline, final pipeline Boolean.
     uint4 Outcome;
+    // Before TraceRay, after TraceRay, original direction.z bits, reserved.
+    uint4 Witness;
 };
 
 globallycoherent RWStructuredBuffer<PipelineState> PipelineDiagnostics : register(u2);
