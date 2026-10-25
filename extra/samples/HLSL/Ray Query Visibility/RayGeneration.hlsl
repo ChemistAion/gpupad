@@ -1,26 +1,18 @@
 #include "SphereVisibility.hlsl"
 #include "RayInputs.hlsl"
-#include "PipelineDiagnostics.hlsl"
 
 RaytracingAccelerationStructure Scene : register(t0);
 StructuredBuffer<float4> Spheres : register(t1);
 RWTexture2D<float4> OutputImage : register(u0);
 RWStructuredBuffer<uint4> Results : register(u1);
 
-bool PipelineBlocked(RayDesc ray, out uint rawBlocked)
+bool PipelineBlocked(RayDesc ray)
 {
     VisibilityPayload payload;
     payload.Blocked = 1u;
-    const uint index = DispatchRaysIndex().y * 6u + DispatchRaysIndex().x;
-    PipelineDiagnostics[index].Witness.x = payload.Blocked;
-    PipelineDiagnostics[index].Witness.z = asuint(ray.Direction.z);
-    DeviceMemoryBarrier();
     TraceRay(Scene, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
         | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 0, ray, payload);
-    rawBlocked = payload.Blocked;
-    PipelineDiagnostics[index].Witness.y = payload.Blocked;
-    DeviceMemoryBarrier();
-    return rawBlocked != 0u;
+    return payload.Blocked != 0u;
 }
 
 bool InlineBlocked(RayDesc ray)
@@ -53,18 +45,8 @@ void RayGeneration()
     ray.Direction = directionMax.xyz;
     ray.TMin = originMin.w;
     ray.TMax = directionMax.w;
-    PipelineState initialState = (PipelineState)0;
-    initialState.State.w = -1.0;
-    PipelineDiagnostics[index] = initialState;
-    DeviceMemoryBarrier();
-    uint rawBlocked;
-    const bool pipeline = PipelineBlocked(ray, rawBlocked);
-    DeviceMemoryBarrier();
-    PipelineDiagnostics[index].Outcome.y = rawBlocked;
-    DeviceMemoryBarrier();
+    const bool pipeline = PipelineBlocked(ray);
     const bool inlineHit = InlineBlocked(ray);
-    PipelineDiagnostics[index].Outcome.z = rawBlocked;
-    PipelineDiagnostics[index].Outcome.w = uint(pipeline);
 
     // Simple reference cases also catch a broken all-miss setup.
     static const uint expected[8] = { 1u, 0u, 0u, 1u, 1u, 1u, 1u, 1u };

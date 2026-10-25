@@ -1,61 +1,39 @@
-# Ray Query Visibility
+# Ray Query Visibility — unadopted composition candidate
 
-Requires Direct3D12 DXR Tier1.1+, DXC and SM6.5. This session selects6.5 through
-the optional compiler setting; it does not require compute TLAS binding.
+Requires Direct3D12 DXR Tier1.1+, DXC and SM6.5. Open rayquery.gpjs and evaluate.
+The6x6 board compares pipeline and inline visibility for36 fixed FP32 rays.
+Top: pipeline; middle: inline; bottom: green agreement, red disagreement or
+failed reference. Dark means blocked, white clear. Results/Ray exposes
+PipelineBlocked, InlineBlocked, Match and ExpectedBlocked. The first eight
+cases have independent expectations; later ExpectedBlocked values are0xffffffff.
 
-Open `rayquery.gpjs`, F5/evaluate, then open OutputImage and fit the image.
-The6×6 board contains36 fixed rays, in row-major order. Each tile has three bands:
+Both paths use the original unit sphere, AABB, identity instance, finite ray
+intervals and shifted-origin/direct-root solver, including nonunit directions.
+Pipeline flags remain FORCE_OPAQUE | ACCEPT_FIRST_HIT_AND_END_SEARCH |
+SKIP_CLOSEST_HIT_SHADER. The miss shader clears the initialized uint1 payload.
+Inline queries solve and commit procedural candidates explicitly.
 
-- Top: pipeline visibility, dark = blocked and white = clear.
-- Middle: inline visibility, same colors.
-- Bottom: green = agreement; red = mismatch or failed reference classification.
+## Candidate qualification
 
-Results/Ray exposes four uint columns: PipelineBlocked, InlineBlocked, Match,
-ExpectedBlocked. Match should be1 for every ray. The first eight cases also
-have simple expected classifications `{1,0,0,1,1,1,1,1}`; later expected values
-are `0xffffffff` (comparison only). A broken all-miss setup therefore cannot
-pass merely because both paths miss everything. No timing conclusion is implied.
+DXR permits procedural hit groups with no closest-hit shader. Nevertheless,
+the tested local stack corrupts payloads for that legal composition. Adding an
+exported, associated, **empty** RayClosestHit entry restores preservation even
+though the trace still skips it. This branch is an explicitly unadopted,
+validated composition workaround; it is not a demonstrated GPUpad root-cause fix.
 
-The first operator comparison found nine pipeline-clear/inline-blocked cases.
-The board still exposes both paths; this is not yet an accepted equivalence test.
-PipelineDiagnostics/Case now records each pipeline intersection callback:
-OriginHitT = object origin + selected hit t; DirectionMin = object direction +
-TMin; Sphere = center/radius; State = invoked, solver hit, initial TMax,
-ReportHit return value (-1 means it did not return, or was not called).
-The fifth row (case4, sphere-center origin) is the first focused diagnostic.
-Zero invoked means no intersection callback was recorded. A changed pattern
-with diagnostics is evidence to investigate, not proof of a numerical fix.
+The clean combined sample passes36/36 and all eight references on the existing
+accepted GPUpad executable. A separate guarded combined control preserves all
+payload words. This sample has no diagnostic buffer, witness writes, temporary
+barriers or hit-shader payload writes. Captured DXIL for the empty hit entry
+contains only ret void apart from debug information.
 
-The callback run left seven numeric mismatches (cases8,15–20), with valid
-pipeline sphere hits. Outcome adds four uints per case: Miss callback ran,
-raw payload immediately after TraceRay, raw value after the inline query,
-and the pipeline Boolean used by the board. Read Outcome for case15 (16th row)
-to distinguish a pipeline miss from return-state/Boolean corruption. Case records
-were80 bytes; Results/Ray remains16 bytes per row. No solver/flag change.
+An independent plain-D3D12 runner replays the same submitted shader bytes and
+configuration on the same GPU: IS-only fails and IS+skipped-CHS passes with
+byte-identical results/diagnostics to GPUpad. Exact compiler/runtime/driver
+attribution remains unresolved. Operator adoption/publication is still pending;
+do not infer that closest-hit is mandatory in DXR or change generic host behavior.
 
-The R1 instrumented control adds Witness: payload before TraceRay, payload
-immediately after TraceRay, original direction.z bits, reserved. Records are
-96 bytes. Callback stores preserve these raygen-owned fields and use explicit
-device barriers. The executed R1 control still has seven disagreements;
-Before is1 in all36 cases, while all28 solver-hit payloads return direction.z
-bits instead of integer1. This is diagnostic evidence, not an accepted repair.
-
-Both methods trace the same FP32 finite segment, mask0xff and opaque unit sphere.
-The pipeline skips closest-hit; inline traversal handles procedural candidates
-explicitly and never accepts their AABB as a surface hit. Both call SphereHit,
-which retains the shifted-origin/direct-root arithmetic, strict local/original
-upper bounds and unnormalized direction. This compares accepted visibility
-policy; it does not repair near-zero/tangent limitations of that solver.
-
-The raygen pipeline still uses its state object, procedural hit group and miss
-record. The inline query itself invokes no intersection/closest-hit/miss shader
-or SBT lookup. One identity instance and one geometry keep primitive indexing
-explicit; general mixed/instanced addressing is outside this sample.
-
-Provenance: sphere C arithmetic and36 exact uint4 origin/direction
-inputs are reused from rtj's engine RTX Stage007/008 diagnostics. RayInputs
-selects source indices0..31 and36..39, retaining original FP32 bits for
-clear/blocked, interior, finite clipping,
-grazing, distance and nonunit cases. Both paths use identical decoded inputs.
-This addition belongs to Stage010-B2; no renderer material/transport or native
-compute-binding behavior is changed.
+Provenance: rtj's engine Stage010-B2 R11/R12 investigation. Sphere arithmetic
+and36 uint4 ray records derive from engine Stage007/008 precision controls;
+source indices0..31 and36..39 retain their original FP32 bits. This sample
+changes no renderer transport, native host or compute-AS binding feature.
