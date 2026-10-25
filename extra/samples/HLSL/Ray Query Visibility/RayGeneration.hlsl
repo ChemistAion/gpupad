@@ -1,5 +1,6 @@
 #include "SphereVisibility.hlsl"
 #include "RayInputs.hlsl"
+#include "PipelineDiagnostics.hlsl"
 
 RaytracingAccelerationStructure Scene : register(t0);
 StructuredBuffer<float4> Spheres : register(t1);
@@ -45,6 +46,10 @@ void RayGeneration()
     ray.Direction = directionMax.xyz;
     ray.TMin = originMin.w;
     ray.TMax = directionMax.w;
+    PipelineState initialState = (PipelineState)0;
+    initialState.State.w = -1.0;
+    PipelineDiagnostics[index] = initialState;
+    DeviceMemoryBarrier();
     const bool pipeline = PipelineBlocked(ray);
     const bool inlineHit = InlineBlocked(ray);
 

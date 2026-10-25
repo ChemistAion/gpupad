@@ -49,12 +49,27 @@
         }
       ]
     },
+    {
+      "type": "Buffer", "id": 90, "name": "PipelineDiagnostics",
+      "items": [
+        {
+          "type": "Block", "id": 91, "name": "Case", "rowCount": "36",
+          "items": [
+            { "type": "Field", "id": 92, "name": "OriginHitT", "dataType": "Float", "count": 4 },
+            { "type": "Field", "id": 93, "name": "DirectionMin", "dataType": "Float", "count": 4 },
+            { "type": "Field", "id": 94, "name": "Sphere", "dataType": "Float", "count": 4 },
+            { "type": "Field", "id": 95, "name": "State", "dataType": "Float", "count": 4 }
+          ]
+        }
+      ]
+    },
     { "type": "Script", "id": 40, "fileName": "generateScene.js", "executeOn": "ResetEvaluation" },
     {
       "type": "Program", "id": 50, "name": "Program",
       "items": [
         { "type": "Shader", "id": 51, "fileName": "SphereVisibility.hlsl", "shaderType": "Includable" },
         { "type": "Shader", "id": 52, "fileName": "RayInputs.hlsl", "shaderType": "Includable" },
+        { "type": "Shader", "id": 56, "fileName": "PipelineDiagnostics.hlsl", "shaderType": "Includable" },
         { "type": "Shader", "id": 53, "fileName": "RayGeneration.hlsl", "shaderType": "RayGeneration", "entryPoint": "RayGeneration" },
         { "type": "Shader", "id": 54, "fileName": "RayIntersection.hlsl", "shaderType": "RayIntersection", "entryPoint": "RayIntersection" },
         { "type": "Shader", "id": 55, "fileName": "RayMiss.hlsl", "shaderType": "RayMiss", "entryPoint": "RayMiss" }
@@ -73,6 +88,7 @@
     },
     { "type": "Binding", "id": 70, "name": "Spheres", "bindingType": "BufferBlock", "blockId": 11 },
     { "type": "Binding", "id": 71, "name": "Results", "bindingType": "BufferBlock", "blockId": 31 },
+    { "type": "Binding", "id": 73, "name": "PipelineDiagnostics", "bindingType": "BufferBlock", "blockId": 91 },
     { "type": "Binding", "id": 72, "name": "OutputImage", "bindingType": "Image", "textureId": 2, "imageFormat": "Internal", "layer": -1 },
     {
       "type": "Call", "id": 80, "name": "Compare Pipeline and Inline", "checked": true,

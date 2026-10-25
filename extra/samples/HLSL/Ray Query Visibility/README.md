@@ -16,6 +16,16 @@ have simple expected classifications `{1,0,0,1,1,1,1,1}`; later expected values
 are `0xffffffff` (comparison only). A broken all-miss setup therefore cannot
 pass merely because both paths miss everything. No timing conclusion is implied.
 
+The first operator comparison found nine pipeline-clear/inline-blocked cases.
+The board still exposes both paths; this is not yet an accepted equivalence test.
+PipelineDiagnostics/Case now records each pipeline intersection callback:
+OriginHitT = object origin + selected hit t; DirectionMin = object direction +
+TMin; Sphere = center/radius; State = invoked, solver hit, initial TMax,
+ReportHit return value (-1 means it did not return, or was not called).
+The fifth row (case4, sphere-center origin) is the first focused diagnostic.
+Zero invoked means no intersection callback was recorded. A changed pattern
+with diagnostics is evidence to investigate, not proof of a numerical fix.
+
 Both methods trace the same FP32 finite segment, mask0xff and opaque unit sphere.
 The pipeline skips closest-hit; inline traversal handles procedural candidates
 explicitly and never accepts their AABB as a surface hit. Both call SphereHit,
