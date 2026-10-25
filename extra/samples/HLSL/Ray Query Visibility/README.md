@@ -28,9 +28,10 @@ record. The inline query itself invokes no intersection/closest-hit/miss shader
 or SBT lookup. One identity instance and one geometry keep primitive indexing
 explicit; general mixed/instanced addressing is outside this sample.
 
-Provenance: sphere C arithmetic and the first36 exact uint4 origin/direction
+Provenance: sphere C arithmetic and36 exact uint4 origin/direction
 inputs are reused from rtj's engine RTX Stage007/008 diagnostics. RayInputs
-retains original FP32 bits, including clear/blocked, interior, finite clipping,
+selects source indices0..31 and36..39, retaining original FP32 bits for
+clear/blocked, interior, finite clipping,
 grazing, distance and nonunit cases. Both paths use identical decoded inputs.
 This addition belongs to Stage010-B2; no renderer material/transport or native
 compute-binding behavior is changed.
