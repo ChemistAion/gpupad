@@ -57,6 +57,13 @@ It is even possible to drag the items to and from a text editor (they are serial
 The session can be evaluated manually *[F6]*, automatically whenever something relevant changes *[F7]* or steadily *[F8]*, for animations.
 All items which contributed to the last evaluation are highlighted.
 
+When the Direct3D 12 device is initialized, the *Messages* window reports its
+DXR tier and highest supported device shader model. The shader-model query is
+bounded by the SDK used to build GPUpad; older runtimes are queried with lower
+models when necessary. Failed queries report their HRESULT instead of implying
+support. These diagnostics do not change shader profiles or rendering behavior.
+They are also available through `app.messages` and headless `--verbose` output.
+
 ### Items
 A session is built from the following items:
 

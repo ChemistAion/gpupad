@@ -95,6 +95,7 @@ MessageSeverity getMessageSeverity(const Message &message)
     case TooManyPrintfCalls:       return MessageSeverity::Warning;
 
     case ShaderInfo:
+    case DeviceInfo:
     case ScriptMessage:
     case CallDuration:
     case TotalDuration: return MessageSeverity::Info;
@@ -119,6 +120,7 @@ QString getMessageText(const Message &message)
     using enum MessageType;
     switch (message.type) {
     case None:
+    case DeviceInfo:
     case ShaderInfo:
     case ShaderWarning:
     case ShaderError:
