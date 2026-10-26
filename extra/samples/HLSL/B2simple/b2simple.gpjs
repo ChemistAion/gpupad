@@ -1,0 +1,67 @@
+{
+  "type": "Session",
+  "id": 1,
+  "name": "B2simple - Raygeneration Inline Query",
+  "renderer": "Direct3D",
+  "shaderLanguage": "HLSL",
+  "shaderCompiler": "DXC",
+  "shaderCompilerSettings": { "shaderModel": "6.5" },
+  "flipViewport": false,
+  "items": [
+    {
+      "type": "Texture", "id": 2, "name": "OutputImage",
+      "target": "Target2D", "format": "RGBA8_UNorm", "width": "384", "height": "96"
+    },
+    {
+      "type": "Buffer", "id": 10, "name": "Vertices",
+      "items": [
+        {
+          "type": "Block", "id": 11, "name": "Vertex", "rowCount": "3",
+          "items": [
+            { "type": "Field", "id": 12, "name": "Position", "dataType": "Float", "count": 3 }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer", "id": 30, "name": "Results",
+      "items": [
+        {
+          "type": "Block", "id": 31, "name": "Ray", "rowCount": "4",
+          "items": [
+            { "type": "Field", "id": 32, "name": "Hit", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 33, "name": "Expected", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 34, "name": "Match", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 35, "name": "HitT", "dataType": "Float", "count": 1 }
+          ]
+        }
+      ]
+    },
+    { "type": "Script", "id": 40, "fileName": "generateScene.js", "executeOn": "ResetEvaluation" },
+    {
+      "type": "Program", "id": 50, "name": "Program",
+      "items": [
+        { "type": "Shader", "id": 53, "fileName": "RayGeneration.hlsl", "shaderType": "RayGeneration", "entryPoint": "RayGeneration" },
+        { "type": "Shader", "id": 55, "fileName": "RayMiss.hlsl", "shaderType": "RayMiss", "entryPoint": "RayMiss" }
+      ]
+    },
+    {
+      "type": "AccelerationStructure", "id": 60, "name": "Scene",
+      "items": [
+        {
+          "type": "Instance", "id": 61, "name": "Identity",
+          "items": [
+            { "type": "Geometry", "id": 62, "name": "Triangle", "geometryType": "Triangles", "vertexBufferBlockId": 11 }
+          ]
+        }
+      ]
+    },
+    { "type": "Binding", "id": 71, "name": "Results", "bindingType": "BufferBlock", "blockId": 31 },
+    { "type": "Binding", "id": 72, "name": "OutputImage", "bindingType": "Image", "textureId": 2, "imageFormat": "Internal", "layer": -1 },
+    {
+      "type": "Call", "id": 80, "name": "Raygeneration Inline Query", "checked": true,
+      "callType": "TraceRays", "programId": 50, "accelerationStructureId": 60,
+      "workGroupsX": "4", "workGroupsY": "1", "workGroupsZ": "1"
+    }
+  ]
+}
