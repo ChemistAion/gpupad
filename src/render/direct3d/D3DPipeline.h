@@ -68,6 +68,7 @@ private:
     bool createInputLayout(std::vector<D3D12_INPUT_ELEMENT_DESC> *inputLayout);
     bool createRootSignature(D3DContext &context);
     bool createRootSignatureRayTracing(D3DContext &context);
+    bool createRayTracingExplicit(D3DContext &context);
     bool createRootSignatureFromTables(D3DContext &context,
         std::vector<DescriptorTableDesc> descriptorTableDescs,
         std::vector<CD3DX12_STATIC_SAMPLER_DESC> staticSamplers);

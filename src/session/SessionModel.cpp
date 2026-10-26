@@ -572,7 +572,10 @@ void SessionModel::deserialize(const JsonObject &object,
             QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()));
         auto value = variantFromJson(json);
 
-        if (property == "name") {
+        if (type == Item::Type::Program && property == "rayTracing" && !json.is_object()) {
+            // Keep explicit malformed input on the error path instead of selecting legacy mode.
+            setField(index, ProgramRayTracing, QVariantMap{{ "_invalidType", value }});
+        } else if (property == "name") {
             setField(index, Name, value);
         } else if (property == "custom") {
             setField(index, Custom, value);
@@ -641,6 +644,11 @@ void SessionModel::serialize(JsonObject &object, const Item &item,
     ADD_EACH_COLUMN_TYPE()
 #undef ADD
 
+    // Scope recursive serialization to this property; flat settings maps are unchanged.
+    if (const auto program = castItem<Program>(&item);
+        program && !program->rayTracing.isEmpty())
+        object["rayTracing"] = jsonFromVariant(program->rayTracing);
+
     if (!serializingScriptItem && !item.items.empty()
         && !isDynamicGroup(item)) {
         auto items = JsonArray();
@@ -672,6 +680,12 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
     case Item::Type::Group: {
         const auto &group = static_cast<const Group &>(item);
         result &= (column != GroupDynamic || (group.dynamic));
+        break;
+    }
+
+    case Item::Type::Program: {
+        const auto &program = static_cast<const Program &>(item);
+        result &= (column != ProgramRayTracing || !program.rayTracing.isEmpty());
         break;
     }
 

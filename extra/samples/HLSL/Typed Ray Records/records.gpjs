@@ -1,0 +1,347 @@
+{
+  "type": "Session",
+  "id": 1,
+  "name": "Typed Ray Records",
+  "renderer": "Direct3D",
+  "shaderLanguage": "HLSL",
+  "shaderCompiler": "DXC",
+  "shaderCompilerSettings": {
+    "shaderModel": "6.5"
+  },
+  "flipViewport": false,
+  "items": [
+    {
+      "type": "Texture",
+      "id": 2,
+      "name": "OutputImage",
+      "target": "Target2D",
+      "format": "RGBA8_UNorm",
+      "width": "384",
+      "height": "192"
+    },
+    {
+      "type": "Buffer",
+      "id": 10,
+      "name": "Vertices",
+      "items": [
+        {
+          "type": "Block",
+          "id": 11,
+          "name": "Vertices",
+          "rowCount": "3",
+          "items": [
+            {
+              "type": "Field",
+              "id": 12,
+              "name": "Position",
+              "dataType": "Float",
+              "count": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 15,
+      "name": "Spheres",
+      "items": [
+        {
+          "type": "Block",
+          "id": 16,
+          "name": "Spheres",
+          "rowCount": "1",
+          "items": [
+            {
+              "type": "Field",
+              "id": 17,
+              "name": "CenterRadius",
+              "dataType": "Float",
+              "count": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 20,
+      "name": "Bounds",
+      "items": [
+        {
+          "type": "Block",
+          "id": 21,
+          "name": "Bounds",
+          "rowCount": "1",
+          "items": [
+            {
+              "type": "Field",
+              "id": 22,
+              "name": "Minimum",
+              "dataType": "Float",
+              "count": 3
+            },
+            {
+              "type": "Field",
+              "id": 23,
+              "name": "Maximum",
+              "dataType": "Float",
+              "count": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 30,
+      "name": "Results",
+      "items": [
+        {
+          "type": "Block",
+          "id": 31,
+          "name": "Ray",
+          "rowCount": "6",
+          "items": [
+            {
+              "type": "Field",
+              "id": 32,
+              "name": "Marker",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 33,
+              "name": "Expected",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 34,
+              "name": "InstanceID",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 35,
+              "name": "Match",
+              "dataType": "Uint32",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Script",
+      "id": 40,
+      "fileName": "generateScene.js",
+      "executeOn": "ResetEvaluation"
+    },
+    {
+      "type": "Program",
+      "id": 50,
+      "name": "Program",
+      "rayTracing": {
+        "rayGenerationRecord": {
+          "export": "RayGeneration"
+        },
+        "hitGroups": [
+          {
+            "name": "TrianglePrimary",
+            "type": "Triangles",
+            "closestHit": "TrianglePrimaryCHS"
+          },
+          {
+            "name": "TriangleSecondary",
+            "type": "Triangles",
+            "closestHit": "TriangleSecondaryCHS"
+          },
+          {
+            "name": "SpherePrimary",
+            "type": "Procedural",
+            "closestHit": "SpherePrimaryCHS",
+            "intersection": "SphereIS"
+          },
+          {
+            "name": "SphereSecondary",
+            "type": "Procedural",
+            "closestHit": "SphereSecondaryCHS",
+            "intersection": "SphereIS"
+          }
+        ],
+        "missRecords": [
+          {
+            "export": "PrimaryMiss"
+          },
+          {
+            "export": "SecondaryMiss"
+          }
+        ],
+        "hitRecords": [
+          {
+            "export": "TrianglePrimary"
+          },
+          {
+            "export": "TriangleSecondary"
+          },
+          {
+            "export": "SpherePrimary"
+          },
+          {
+            "export": "SphereSecondary"
+          }
+        ]
+      },
+      "items": [
+        {
+          "type": "Shader",
+          "id": 51,
+          "fileName": "Payload.hlsl",
+          "shaderType": "Includable"
+        },
+        {
+          "type": "Shader",
+          "id": 52,
+          "fileName": "SphereVisibility.hlsl",
+          "shaderType": "Includable"
+        },
+        {
+          "type": "Shader",
+          "id": 100,
+          "fileName": "RayGeneration.hlsl",
+          "shaderType": "RayGeneration",
+          "entryPoint": "RayGeneration"
+        },
+        {
+          "type": "Shader",
+          "id": 101,
+          "fileName": "SphereIS.hlsl",
+          "shaderType": "RayIntersection",
+          "entryPoint": "SphereIS"
+        },
+        {
+          "type": "Shader",
+          "id": 102,
+          "fileName": "TrianglePrimaryCHS.hlsl",
+          "shaderType": "RayClosestHit",
+          "entryPoint": "TrianglePrimaryCHS"
+        },
+        {
+          "type": "Shader",
+          "id": 103,
+          "fileName": "TriangleSecondaryCHS.hlsl",
+          "shaderType": "RayClosestHit",
+          "entryPoint": "TriangleSecondaryCHS"
+        },
+        {
+          "type": "Shader",
+          "id": 104,
+          "fileName": "SpherePrimaryCHS.hlsl",
+          "shaderType": "RayClosestHit",
+          "entryPoint": "SpherePrimaryCHS"
+        },
+        {
+          "type": "Shader",
+          "id": 105,
+          "fileName": "SphereSecondaryCHS.hlsl",
+          "shaderType": "RayClosestHit",
+          "entryPoint": "SphereSecondaryCHS"
+        },
+        {
+          "type": "Shader",
+          "id": 106,
+          "fileName": "PrimaryMiss.hlsl",
+          "shaderType": "RayMiss",
+          "entryPoint": "PrimaryMiss"
+        },
+        {
+          "type": "Shader",
+          "id": 107,
+          "fileName": "SecondaryMiss.hlsl",
+          "shaderType": "RayMiss",
+          "entryPoint": "SecondaryMiss"
+        }
+      ]
+    },
+    {
+      "type": "AccelerationStructure",
+      "id": 60,
+      "name": "Scene",
+      "items": [
+        {
+          "type": "Instance",
+          "id": 61,
+          "name": "TriangleInstance",
+          "customIndex": "17",
+          "hitGroupOffset": "0",
+          "transform": "[1,0,0,-2, 0,1,0,0, 0,0,1,0]",
+          "items": [
+            {
+              "type": "Geometry",
+              "id": 62,
+              "name": "Triangle",
+              "geometryType": "Triangles",
+              "vertexBufferBlockId": 11
+            }
+          ]
+        },
+        {
+          "type": "Instance",
+          "id": 63,
+          "name": "SphereInstance",
+          "customIndex": "42",
+          "hitGroupOffset": "2",
+          "transform": "[1,0,0,2, 0,1,0,0, 0,0,1,0]",
+          "items": [
+            {
+              "type": "Geometry",
+              "id": 64,
+              "name": "SphereBounds",
+              "geometryType": "AxisAlignedBoundingBoxes",
+              "vertexBufferBlockId": 21
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Binding",
+      "id": 70,
+      "name": "Spheres",
+      "bindingType": "BufferBlock",
+      "blockId": 16
+    },
+    {
+      "type": "Binding",
+      "id": 71,
+      "name": "Results",
+      "bindingType": "BufferBlock",
+      "blockId": 31
+    },
+    {
+      "type": "Binding",
+      "id": 72,
+      "name": "OutputImage",
+      "bindingType": "Image",
+      "textureId": 2,
+      "imageFormat": "Internal",
+      "layer": -1
+    },
+    {
+      "type": "Call",
+      "id": 80,
+      "name": "Trace Typed Records",
+      "checked": true,
+      "callType": "TraceRays",
+      "programId": 50,
+      "accelerationStructureId": 60,
+      "workGroupsX": "3",
+      "workGroupsY": "2",
+      "workGroupsZ": "1"
+    }
+  ]
+}
