@@ -275,6 +275,11 @@ struct AccelerationStructure : Item
 struct Instance : Item
 {
     QString transform;
+    // Direct3D: zero owns child geometry; otherwise share a sibling owner's BLAS.
+    ItemId sourceInstanceId{ };
+    QString customIndex; // Empty retains the legacy ordinal InstanceID.
+    QString mask{ "255" };
+    QString hitGroupOffset{ "0" };
 };
 
 struct Geometry : Item

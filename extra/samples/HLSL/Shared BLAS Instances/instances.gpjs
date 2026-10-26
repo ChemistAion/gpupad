@@ -1,0 +1,69 @@
+{
+  "type": "Session", "id": 1, "name": "Shared BLAS Instances",
+  "renderer": "Direct3D", "shaderLanguage": "HLSL", "shaderCompiler": "DXC",
+  "shaderCompilerSettings": { "shaderModel": "6.5" }, "flipViewport": false,
+  "items": [
+    {
+      "type": "Texture", "id": 2, "name": "OutputImage", "target": "Target2D",
+      "format": "RGBA8_UNorm", "width": "512", "height": "192"
+    },
+    {
+      "type": "Buffer", "id": 10, "name": "Vertices",
+      "items": [
+        {
+          "type": "Block", "id": 11, "name": "Vertex", "rowCount": "3",
+          "items": [
+            { "type": "Field", "id": 12, "name": "Position", "dataType": "Float", "count": 3 }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer", "id": 30, "name": "Results",
+      "items": [
+        {
+          "type": "Block", "id": 31, "name": "Ray", "rowCount": "8",
+          "items": [
+            { "type": "Field", "id": 32, "name": "Hit", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 33, "name": "InstanceID", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 34, "name": "InstanceIndex", "dataType": "Uint32", "count": 1 },
+            { "type": "Field", "id": 35, "name": "Match", "dataType": "Uint32", "count": 1 }
+          ]
+        }
+      ]
+    },
+    { "type": "Script", "id": 40, "fileName": "generateScene.js", "executeOn": "ResetEvaluation" },
+    {
+      "type": "Program", "id": 50, "name": "Program",
+      "items": [
+        { "type": "Shader", "id": 51, "fileName": "Compute.hlsl", "shaderType": "Compute", "entryPoint": "main" }
+      ]
+    },
+    {
+      "type": "AccelerationStructure", "id": 60, "name": "Scene",
+      "items": [
+        {
+          "type": "Instance", "id": 61, "name": "LeftOwner",
+          "transform": "[1,0,0,-2, 0,1,0,0, 0,0,1,0]",
+          "customIndex": "17", "mask": "1", "hitGroupOffset": "3",
+          "items": [
+            { "type": "Geometry", "id": 62, "name": "Triangle", "geometryType": "Triangles", "vertexBufferBlockId": 11 }
+          ]
+        },
+        {
+          "type": "Instance", "id": 63, "name": "RightShared",
+          "sourceInstanceId": 61,
+          "transform": "[1,0,0,2, 0,1,0,0, 0,0,1,0]",
+          "customIndex": "42", "mask": "2", "hitGroupOffset": "7"
+        }
+      ]
+    },
+    { "type": "Binding", "id": 71, "name": "Results", "bindingType": "BufferBlock", "blockId": 31 },
+    { "type": "Binding", "id": 72, "name": "OutputImage", "bindingType": "Image", "textureId": 2, "imageFormat": "Internal", "layer": -1 },
+    {
+      "type": "Call", "id": 80, "name": "Query Shared Instances", "checked": true,
+      "callType": "Compute", "programId": 50, "accelerationStructureId": 60,
+      "workGroupsX": "1", "workGroupsY": "1", "workGroupsZ": "1"
+    }
+  ]
+}

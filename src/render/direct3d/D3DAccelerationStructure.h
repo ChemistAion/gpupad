@@ -52,6 +52,17 @@ private:
 
         ItemId itemId{ };
         QString transform;
+        ItemId sourceInstanceId{ };
+        QString customIndex;
+        QString mask;
+        QString hitGroupOffset;
+    };
+
+    // Build inputs belong to a geometry owner, not to each referencing instance.
+    struct D3DBottomLevelInputs
+    {
+        bool operator==(const D3DBottomLevelInputs &) const = default;
+
         std::vector<D3DGeometry> geometries;
     };
 
@@ -61,6 +72,8 @@ private:
     MessagePtrSet mMessages;
     QSet<ItemId> mUsedItems;
     std::vector<D3DInstance> mInstances;
+    std::vector<D3DBottomLevelInputs> mBottomLevelInputs;
+    // Indexed by owner instance; references leave their allocation slot empty.
     std::vector<ComPtr<ID3D12Resource>> mBottomLevels;
     std::vector<ComPtr<ID3D12Resource>> mScratchBuffers;
     ComPtr<ID3D12Resource> mInstanceBuffer;
