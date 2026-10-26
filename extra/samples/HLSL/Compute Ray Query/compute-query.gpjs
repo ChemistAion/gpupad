@@ -1,0 +1,205 @@
+{
+  "type": "Session",
+  "id": 1,
+  "name": "Compute Ray Query",
+  "renderer": "Direct3D",
+  "shaderLanguage": "HLSL",
+  "shaderCompiler": "DXC",
+  "shaderCompilerSettings": {
+    "shaderModel": "6.5"
+  },
+  "flipViewport": false,
+  "items": [
+    {
+      "type": "Texture",
+      "id": 2,
+      "name": "OutputImage",
+      "target": "Target2D",
+      "format": "RGBA8_UNorm",
+      "width": "768",
+      "height": "576"
+    },
+    {
+      "type": "Buffer",
+      "id": 10,
+      "name": "Spheres",
+      "items": [
+        {
+          "type": "Block",
+          "id": 11,
+          "name": "Sphere",
+          "rowCount": "1",
+          "items": [
+            {
+              "type": "Field",
+              "id": 12,
+              "name": "CenterRadius",
+              "dataType": "Float",
+              "count": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 20,
+      "name": "Bounds",
+      "items": [
+        {
+          "type": "Block",
+          "id": 21,
+          "name": "AABB",
+          "rowCount": "1",
+          "items": [
+            {
+              "type": "Field",
+              "id": 22,
+              "name": "Minimum",
+              "dataType": "Float",
+              "count": 3
+            },
+            {
+              "type": "Field",
+              "id": 23,
+              "name": "Maximum",
+              "dataType": "Float",
+              "count": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 30,
+      "name": "Results",
+      "items": [
+        {
+          "type": "Block",
+          "id": 31,
+          "name": "Ray",
+          "rowCount": "36",
+          "items": [
+            {
+              "type": "Field",
+              "id": 32,
+              "name": "ComputeBlocked",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 33,
+              "name": "ReferenceOK",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 34,
+              "name": "ExpectedBlocked",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 35,
+              "name": "CommittedStatus",
+              "dataType": "Uint32",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Script",
+      "id": 40,
+      "fileName": "generateScene.js",
+      "executeOn": "ResetEvaluation"
+    },
+    {
+      "type": "Program",
+      "id": 50,
+      "name": "Program",
+      "items": [
+        {
+          "type": "Shader",
+          "id": 51,
+          "fileName": "SphereVisibility.hlsl",
+          "shaderType": "Includable"
+        },
+        {
+          "type": "Shader",
+          "id": 52,
+          "fileName": "RayInputs.hlsl",
+          "shaderType": "Includable"
+        },
+        {
+          "type": "Shader",
+          "id": 53,
+          "fileName": "Compute.hlsl",
+          "shaderType": "Compute",
+          "entryPoint": "ComputeVisibility"
+        }
+      ]
+    },
+    {
+      "type": "AccelerationStructure",
+      "id": 60,
+      "name": "Scene",
+      "items": [
+        {
+          "type": "Instance",
+          "id": 61,
+          "name": "Identity",
+          "items": [
+            {
+              "type": "Geometry",
+              "id": 62,
+              "name": "SphereBounds",
+              "geometryType": "AxisAlignedBoundingBoxes",
+              "vertexBufferBlockId": 21
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Binding",
+      "id": 70,
+      "name": "Spheres",
+      "bindingType": "BufferBlock",
+      "blockId": 11
+    },
+    {
+      "type": "Binding",
+      "id": 71,
+      "name": "Results",
+      "bindingType": "BufferBlock",
+      "blockId": 31
+    },
+    {
+      "type": "Binding",
+      "id": 72,
+      "name": "OutputImage",
+      "bindingType": "Image",
+      "textureId": 2,
+      "imageFormat": "Internal",
+      "layer": -1
+    },
+    {
+      "type": "Call",
+      "id": 80,
+      "name": "Compute Inline Visibility",
+      "checked": true,
+      "callType": "Compute",
+      "programId": 50,
+      "accelerationStructureId": 60,
+      "workGroupsX": "5",
+      "workGroupsY": "1",
+      "workGroupsZ": "1"
+    }
+  ]
+}

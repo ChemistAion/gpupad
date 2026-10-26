@@ -825,7 +825,7 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
             || callType == Call::CallType::CopyBuffer
             || callType == Call::CallType::SwapBuffers);
         result &= (column != CallAccelerationStructureId
-            || callType == Call::CallType::TraceRays);
+            || kind.compute || kind.trace);
         break;
     }
 
