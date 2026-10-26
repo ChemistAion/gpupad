@@ -381,7 +381,14 @@ namespace ShaderCompiler {
         //arguments.add(L"-ignore-line-directives");
 
         auto compileInput = input;
-        if (isRayTracingShaderType(input.shaderType)) {
+        // SM6.5+ compute may use RayQuery: reflection needs the same target
+        // and include-line handling as ray shaders. Native DXIL is unchanged.
+        const auto computeRayQuery = input.shaderType == Shader::ShaderType::Compute
+            && session.renderer == Session::Renderer::Direct3D
+            && getShaderCompilerSetting(session,
+                   Session::ShaderCompilerSetting::shaderModel)
+                       .toString().trimmed().section('.', 1).toInt() >= 5;
+        if (isRayTracingShaderType(input.shaderType) || computeRayQuery) {
             if (session.renderer != Session::Renderer::Vulkan)
                 arguments.add(L"-fspv-target-env=vulkan1.2");
             arguments.add(L"-ignore-line-directives");
