@@ -1,0 +1,230 @@
+{
+  "type": "Session",
+  "id": 1,
+  "name": "Local Root Constants",
+  "renderer": "Direct3D",
+  "shaderLanguage": "HLSL",
+  "shaderCompiler": "DXC",
+  "shaderCompilerSettings": {
+    "shaderModel": "6.5"
+  },
+  "flipViewport": false,
+  "items": [
+    {
+      "type": "Texture",
+      "id": 2,
+      "name": "OutputImage",
+      "target": "Target2D",
+      "format": "RGBA8_UNorm",
+      "width": "384",
+      "height": "96"
+    },
+    {
+      "type": "Buffer",
+      "id": 10,
+      "name": "Vertices",
+      "items": [
+        {
+          "type": "Block",
+          "id": 11,
+          "name": "Vertices",
+          "rowCount": "3",
+          "items": [
+            {
+              "type": "Field",
+              "id": 12,
+              "name": "Position",
+              "dataType": "Float",
+              "count": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Buffer",
+      "id": 30,
+      "name": "Results",
+      "items": [
+        {
+          "type": "Block",
+          "id": 31,
+          "name": "Ray",
+          "rowCount": "3",
+          "items": [
+            {
+              "type": "Field",
+              "id": 32,
+              "name": "Marker",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 33,
+              "name": "Expected",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 34,
+              "name": "InstanceID",
+              "dataType": "Uint32",
+              "count": 1
+            },
+            {
+              "type": "Field",
+              "id": 35,
+              "name": "Match",
+              "dataType": "Uint32",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Script",
+      "id": 40,
+      "fileName": "generateScene.js",
+      "executeOn": "ResetEvaluation"
+    },
+    {
+      "type": "Program",
+      "id": 50,
+      "name": "Program",
+      "rayTracing": {
+        "rayGenerationRecord": {
+          "export": "RayGeneration"
+        },
+        "localRoots": [
+          {
+            "name": "Material",
+            "parameters": [
+              {
+                "name": "material",
+                "type": "Constants",
+                "shaderRegister": 1,
+                "registerSpace": 1,
+                "count": 1
+              }
+            ]
+          }
+        ],
+        "hitGroups": [
+          {
+            "name": "TriangleMaterial",
+            "type": "Triangles",
+            "closestHit": "TriangleMaterialCHS",
+            "localRoot": "Material"
+          }
+        ],
+        "missRecords": [
+          {
+            "export": "Miss"
+          }
+        ],
+        "hitRecords": [
+          {
+            "export": "TriangleMaterial",
+            "arguments": {
+              "material": [
+                17
+              ]
+            }
+          },
+          {
+            "export": "TriangleMaterial",
+            "arguments": {
+              "material": [
+                42
+              ]
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "type": "Shader",
+          "id": 51,
+          "fileName": "Payload.hlsl",
+          "shaderType": "Includable"
+        },
+        {
+          "type": "Shader",
+          "id": 100,
+          "fileName": "RayGeneration.hlsl",
+          "shaderType": "RayGeneration",
+          "entryPoint": "RayGeneration"
+        },
+        {
+          "type": "Shader",
+          "id": 102,
+          "fileName": "TriangleMaterialCHS.hlsl",
+          "shaderType": "RayClosestHit",
+          "entryPoint": "TriangleMaterialCHS"
+        },
+        {
+          "type": "Shader",
+          "id": 106,
+          "fileName": "Miss.hlsl",
+          "shaderType": "RayMiss",
+          "entryPoint": "Miss"
+        }
+      ]
+    },
+    {
+      "type": "AccelerationStructure",
+      "id": 60,
+      "name": "Scene",
+      "items": [
+        {
+          "type": "Instance",
+          "id": 61,
+          "name": "TriangleInstance",
+          "customIndex": "17",
+          "hitGroupOffset": "0",
+          "transform": "[1,0,0,0, 0,1,0,0, 0,0,1,0]",
+          "items": [
+            {
+              "type": "Geometry",
+              "id": 62,
+              "name": "Triangle",
+              "geometryType": "Triangles",
+              "vertexBufferBlockId": 11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Binding",
+      "id": 71,
+      "name": "Results",
+      "bindingType": "BufferBlock",
+      "blockId": 31
+    },
+    {
+      "type": "Binding",
+      "id": 72,
+      "name": "OutputImage",
+      "bindingType": "Image",
+      "textureId": 2,
+      "imageFormat": "Internal",
+      "layer": -1
+    },
+    {
+      "type": "Call",
+      "id": 80,
+      "name": "Trace Local Constants",
+      "checked": true,
+      "callType": "TraceRays",
+      "programId": 50,
+      "accelerationStructureId": 60,
+      "workGroupsX": "3",
+      "workGroupsY": "1",
+      "workGroupsZ": "1"
+    }
+  ]
+}

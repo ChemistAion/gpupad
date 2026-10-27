@@ -3,6 +3,25 @@
 #include "D3DProgram.h"
 #include <set>
 
+namespace {
+bool readDword(const QVariant &value, UINT &result)
+{
+    switch (value.typeId()) {
+    case QMetaType::Int: case QMetaType::UInt:
+    case QMetaType::LongLong: case QMetaType::ULongLong:
+    case QMetaType::Double: case QMetaType::Float:
+        break;
+    default:
+        return false;
+    }
+    const auto number = value.toDouble();
+    if (!(number >= 0.0 && number <= 4294967295.0))
+        return false;
+    result = static_cast<UINT>(number);
+    return number == result;
+}
+}
+
 bool D3DPipeline::createRayTracing(D3DContext &context,
     D3DAccelerationStructure *accelerationStructure)
 {
@@ -10,6 +29,8 @@ bool D3DPipeline::createRayTracing(D3DContext &context,
         return (mRayTracingStateObject && mRootSignature);
 
     mAccelerationStructure = accelerationStructure;
+    if (!prepareLocalRoots())
+        return false;
     if (!createRootSignatureRayTracing(context))
         return false;
     createDescriptorHeap(context);
@@ -170,8 +191,6 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
     };
     if (config.contains("_invalidType"))
         return fail("rayTracing must be a JSON object");
-    if (config.contains("localRoots"))
-        return fail("Local roots belong to the later D2 contribution");
     for (const auto key : { "hitGroups", "hitRecords", "missRecords" })
         if (config.value(key).typeId() != QMetaType::QVariantList)
             return fail(QStringLiteral("%1 must be an array").arg(key));
@@ -189,7 +208,7 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
     };
     const auto raygen = config.value("rayGenerationRecord").toMap();
     if (raygen.contains("arguments"))
-        return fail("Local arguments belong to D2");
+        return fail("Local arguments are currently supported on hit records only");
     const auto raygenName = raygen.value("export").toString().toStdWString();
     if (!hasStage(raygenName, Shader::ShaderType::RayGeneration))
         return fail("rayGenerationRecord must select a raygeneration export");
@@ -205,8 +224,6 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
         const auto type = item.value("type").toString();
         if (type != "Triangles" && type != "Procedural")
             return fail("Hit-group type must be Triangles or Procedural");
-        if (!item.value("localRoot").toString().isEmpty())
-            return fail("Local roots belong to D2");
         auto group = Group{
             item.value("name").toString().toStdWString(),
             item.value("closestHit").toString().toStdWString(),
@@ -225,26 +242,55 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
         groups.push_back(std::move(group));
     }
 
+    struct Record {
+        std::wstring name;
+        std::vector<UINT> arguments;
+    };
     const auto readRecords = [&](const char *key, bool hitTable,
-                                 std::vector<std::wstring> &names) {
+                                 std::vector<Record> &records) {
         for (const auto &value : config.value(key).toList()) {
             const auto record = value.toMap();
-            if (record.contains("arguments"))
-                return fail("Local arguments belong to D2");
             const auto name = record.value("export").toString().toStdWString();
             if (hitTable ? !groupNames.contains(name)
                          : !hasStage(name, Shader::ShaderType::RayMiss))
                 return fail(QStringLiteral("Unknown or wrong-stage export in %1").arg(key));
-            names.push_back(name);
+            auto result = Record{ name, {} };
+            const auto rootIt = mGroupLocalRoots.find(name);
+            const auto local = hitTable && rootIt != mGroupLocalRoots.end()
+                ? rootIt->second : nullptr;
+            if (record.contains("arguments")
+                && record.value("arguments").typeId() != QMetaType::QVariantMap)
+                return fail("Record arguments must be an object of DWORD arrays");
+            const auto arguments = record.value("arguments").toMap();
+            if (!local && !arguments.isEmpty())
+                return fail("Arguments require a hit group with a local-root schema");
+            if (local) {
+                if (arguments.size() != static_cast<qsizetype>(local->constants.size()))
+                    return fail("Record arguments must match the local parameter names");
+                // Schema order is root-parameter order; map key order is irrelevant.
+                for (const auto &parameter : local->constants) {
+                    const auto values = arguments.value(parameter.name);
+                    if (values.typeId() != QMetaType::QVariantList
+                        || values.toList().size() != parameter.count)
+                        return fail("Local constant argument count mismatch: " + parameter.name);
+                    for (const auto &value : values.toList()) {
+                        auto word = UINT{};
+                        if (!readDword(value, word))
+                            return fail("Local constants require unsigned32-bit integer values");
+                        result.arguments.push_back(word);
+                    }
+                }
+            }
+            records.push_back(std::move(result));
         }
         return true;
     };
-    auto missNames = std::vector<std::wstring>();
-    auto hitNames = std::vector<std::wstring>();
-    if (!readRecords("missRecords", false, missNames)
-        || !readRecords("hitRecords", true, hitNames))
+    auto missRecords = std::vector<Record>();
+    auto hitRecords = std::vector<Record>();
+    if (!readRecords("missRecords", false, missRecords)
+        || !readRecords("hitRecords", true, hitRecords))
         return false;
-    if (missNames.empty())
+    if (missRecords.empty())
         return fail("At least one Miss record is required by this host interface");
 
     auto device = ComPtr<ID3D12Device5>();
@@ -272,6 +318,29 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
     shaderConfig->Config(128, D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES);
     auto root = stateObject.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
     root->SetRootSignature(mRootSignature.Get());
+    for (auto &[name, local] : mLocalRoots) {
+        if (local.exports.empty())
+            continue;
+        auto parameters = std::vector<CD3DX12_ROOT_PARAMETER>();
+        for (const auto &constant : local.constants)
+            parameters.emplace_back().InitAsConstants(constant.count,
+                constant.shaderRegister, constant.registerSpace);
+        const auto desc = CD3DX12_ROOT_SIGNATURE_DESC(
+            static_cast<UINT>(parameters.size()), parameters.data(), 0, nullptr,
+            D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE);
+        auto blob = ComPtr<ID3DBlob>();
+        if (FAILED(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1,
+                &blob, nullptr))
+            || FAILED(context.device.CreateRootSignature(0, blob->GetBufferPointer(),
+                blob->GetBufferSize(), IID_PPV_ARGS(&local.signature))))
+            return fail("Cannot create local root: " + name);
+        auto signature = stateObject.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+        signature->SetRootSignature(local.signature.Get());
+        auto association = stateObject.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+        association->SetSubobjectToAssociate(*signature);
+        for (const auto &exportName : local.exports)
+            association->AddExport(exportName.c_str());
+    }
     auto pipeline = stateObject.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
     pipeline->Config(1);
     if (FAILED(device->CreateStateObject(stateObject, IID_PPV_ARGS(&mRayTracingStateObject))))
@@ -280,14 +349,23 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
     if (FAILED(mRayTracingStateObject.As(&properties)))
         return fail("State-object properties unavailable");
 
-    constexpr auto stride = UINT64{ D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES };
+    constexpr auto identifierSize = UINT64{ D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES };
+    const auto recordStride = [&](const std::vector<Record> &records) {
+        auto size = identifierSize;
+        for (const auto &record : records)
+            size = std::max(size, identifierSize + record.arguments.size() * sizeof(UINT));
+        constexpr auto alignment = UINT64{ D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT };
+        return (size + alignment - 1) & ~(alignment - 1);
+    };
+    const auto missStride = recordStride(missRecords);
+    const auto hitStride = recordStride(hitRecords);
     const auto alignTable = [](UINT64 size) {
         constexpr auto alignment = UINT64{ D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT };
         return (size + alignment - 1) & ~(alignment - 1);
     };
-    const auto missOffset = alignTable(stride);
-    const auto hitOffset = alignTable(missOffset + missNames.size() * stride);
-    const auto bufferSize = alignTable(hitOffset + hitNames.size() * stride);
+    const auto missOffset = alignTable(identifierSize);
+    const auto hitOffset = alignTable(missOffset + missRecords.size() * missStride);
+    const auto bufferSize = alignTable(hitOffset + hitRecords.size() * hitStride);
     const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const auto buffer = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
     if (FAILED(context.device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
@@ -299,36 +377,124 @@ bool D3DPipeline::createRayTracingExplicit(D3DContext &context)
         return fail("Shader-table mapping failed");
     std::memset(data, 0, static_cast<size_t>(bufferSize));
     const auto info = qEnvironmentVariableIsSet("GPUPAD_DXR_SBT_INFO");
-    const auto copy = [&](UINT64 offset, const std::wstring &name) {
-        const auto identifier = properties->GetShaderIdentifier(name.c_str());
+    const auto copy = [&](UINT64 offset, const Record &record) {
+        const auto identifier = properties->GetShaderIdentifier(record.name.c_str());
         if (!identifier) return false;
-        std::memcpy(static_cast<std::byte *>(data) + offset, identifier, stride);
+        auto destination = static_cast<std::byte *>(data) + offset;
+        std::memcpy(destination, identifier, identifierSize);
+        if (!record.arguments.empty())
+            std::memcpy(destination + identifierSize, record.arguments.data(),
+                record.arguments.size() * sizeof(UINT));
         if (info)
             mMessages.insert(mItemId, MessageType::DeviceInfo,
-                QStringLiteral("DXR SBT record: offset=%1 export=%2")
-                    .arg(offset).arg(QString::fromStdWString(name)));
+                QStringLiteral("DXR SBT record: offset=%1 export=%2 localDwords=%3")
+                    .arg(offset).arg(QString::fromStdWString(record.name))
+                    .arg(record.arguments.size()));
         return true;
     };
-    auto valid = copy(0, raygenName);
-    for (auto i = size_t{}; i < missNames.size(); ++i)
-        valid &= copy(missOffset + i * stride, missNames[i]);
-    for (auto i = size_t{}; i < hitNames.size(); ++i)
-        valid &= copy(hitOffset + i * stride, hitNames[i]);
+    auto valid = copy(0, Record{ raygenName, {} });
+    for (auto i = size_t{}; i < missRecords.size(); ++i)
+        valid &= copy(missOffset + i * missStride, missRecords[i]);
+    for (auto i = size_t{}; i < hitRecords.size(); ++i)
+        valid &= copy(hitOffset + i * hitStride, hitRecords[i]);
     mShaderBindingTable->Unmap(0, nullptr);
     if (!valid) return fail("Configured export has no shader identifier");
 
     const auto address = mShaderBindingTable->GetGPUVirtualAddress();
-    mRayGenerationShaderRecord = { address, stride };
-    mMissShaderTable = { address + missOffset, missNames.size() * stride, stride };
-    mHitGroupTable = hitNames.empty() ? D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{}
+    mRayGenerationShaderRecord = { address, identifierSize };
+    mMissShaderTable = { address + missOffset, missRecords.size() * missStride, missStride };
+    mHitGroupTable = hitRecords.empty() ? D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{}
         : D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-              address + hitOffset, hitNames.size() * stride, stride };
+              address + hitOffset, hitRecords.size() * hitStride, hitStride };
     if (info)
         mMessages.insert(mItemId, MessageType::DeviceInfo,
-            QStringLiteral("DXR SBT: missRecords=%1 hitRecords=%2 stride=%3 missOffset=%4 hitOffset=%5 bytes=%6")
-                .arg(missNames.size()).arg(hitNames.size()).arg(stride)
-                .arg(missOffset).arg(hitOffset).arg(bufferSize));
+            QStringLiteral("DXR SBT: missRecords=%1 hitRecords=%2 hitStride=%3 missOffset=%4 hitOffset=%5 bytes=%6 missStride=%7")
+                .arg(missRecords.size()).arg(hitRecords.size()).arg(hitStride)
+                .arg(missOffset).arg(hitOffset).arg(bufferSize).arg(missStride));
     return true;
+}
+
+bool D3DPipeline::prepareLocalRoots()
+{
+    const auto &config = mProgram.rayTracing();
+    const auto fail = [&](const QString &text) {
+        mMessages.insert(mItemId, MessageType::ScriptError, "DXR local roots: " + text);
+        return false;
+    };
+    if (config.contains("localRoots")
+        && config.value("localRoots").typeId() != QMetaType::QVariantList)
+        return fail("localRoots must be an array");
+    for (const auto &value : config.value("localRoots").toList()) {
+        const auto item = value.toMap();
+        const auto name = item.value("name").toString();
+        if (name.isEmpty() || mLocalRoots.contains(name))
+            return fail("Empty or duplicate schema name");
+        if (item.value("parameters").typeId() != QMetaType::QVariantList)
+            return fail("Schema parameters must be an array");
+        auto root = LocalRoot{};
+        auto names = std::set<QString>();
+        auto registers = std::set<std::pair<UINT, UINT>>();
+        auto words = UINT{};
+        for (const auto &entry : item.value("parameters").toList()) {
+            const auto parameter = entry.toMap();
+            auto constant = LocalConstant{ parameter.value("name").toString(), 0, 0, 0 };
+            if (parameter.value("type").toString() != "Constants")
+                return fail("Only Constants parameters are supported");
+            if (constant.name.isEmpty() || !names.insert(constant.name).second
+                || !readDword(parameter.value("shaderRegister"), constant.shaderRegister)
+                || !readDword(parameter.value("registerSpace"), constant.registerSpace)
+                || !readDword(parameter.value("count"), constant.count)
+                || !constant.count || constant.count > 1016
+                || !registers.emplace(constant.registerSpace, constant.shaderRegister).second)
+                return fail("Invalid or duplicate local constant parameter");
+            words += constant.count;
+            if (words > 1016)
+                return fail("Local arguments exceed the4064-byte DXR limit");
+            root.constants.push_back(std::move(constant));
+        }
+        if (root.constants.empty())
+            return fail("Local schemas must contain at least one constant parameter");
+        mLocalRoots.emplace(name, std::move(root));
+    }
+    for (const auto &value : config.value("hitGroups").toList()) {
+        const auto group = value.toMap();
+        const auto name = group.value("name").toString().toStdWString();
+        const auto localName = group.value("localRoot").toString();
+        auto local = std::add_pointer_t<LocalRoot>{};
+        if (!localName.isEmpty()) {
+            const auto it = mLocalRoots.find(localName);
+            if (it == mLocalRoots.end())
+                return fail("Unknown local schema: " + localName);
+            local = &it->second;
+            local->exports.push_back(name);
+            mGroupLocalRoots.emplace(name, local);
+        }
+        // A shared component must see the same local schema in every group.
+        for (const auto key : { "closestHit", "anyHit", "intersection" }) {
+            const auto shader = group.value(key).toString().toStdWString();
+            if (shader.empty())
+                continue;
+            const auto [it, inserted] = mShaderLocalRoots.emplace(shader, local);
+            if (!inserted && it->second != local)
+                return fail("Shared shader has conflicting local-root associations");
+        }
+    }
+    return true;
+}
+
+const D3DPipeline::LocalConstant *D3DPipeline::localConstant(
+    const D3DShader &shader, const D3D12_SHADER_INPUT_BIND_DESC &binding) const
+{
+    if (binding.Type != D3D_SIT_CBUFFER)
+        return nullptr;
+    const auto it = mShaderLocalRoots.find(shader.entryPoint().toStdWString());
+    if (it == mShaderLocalRoots.end() || !it->second)
+        return nullptr;
+    for (const auto &constant : it->second->constants)
+        if (constant.shaderRegister == binding.BindPoint
+            && constant.registerSpace == binding.Space)
+            return &constant;
+    return nullptr;
 }
 
 bool D3DPipeline::createRootSignatureRayTracing(D3DContext &context)
@@ -345,6 +511,20 @@ bool D3DPipeline::createRootSignatureRayTracing(D3DContext &context)
             continue;
         for (const auto &binding : shader.reflection().descriptorBindings()) {
             const auto bindDesc = getD3DBindingDesc(binding);
+            if (const auto constant = localConstant(shader, bindDesc)) {
+                // Cbuffer total size includes tail padding; constants cover member bytes.
+                auto usedBytes = uint32_t{};
+                for (auto i = 0u; i < binding.block.member_count; ++i) {
+                    const auto &member = binding.block.members[i];
+                    usedBytes = std::max(usedBytes, member.offset + member.size);
+                }
+                if (bindDesc.BindCount != 1 || usedBytes > constant->count * 4u) {
+                    mMessages.insert(mItemId, MessageType::ScriptError,
+                        "DXR local constant schema does not cover the reflected cbuffer");
+                    return false;
+                }
+                continue;
+            }
             if (bindDesc.Type == D3D_SIT_SAMPLER) {
                 if (samplers.emplace(bindDesc.Space, bindDesc.BindPoint).second)
                     addStaticSampler(bindDesc, &staticSamplers);
@@ -376,6 +556,17 @@ bool D3DPipeline::createRootSignatureRayTracing(D3DContext &context)
             descriptorHeapOffset += bindDesc.BindCount;
         }
     }
+
+    // The union global root must not claim a register used by a local root.
+    for (const auto &[name, local] : mLocalRoots)
+        if (!local.exports.empty())
+            for (const auto &constant : local.constants)
+                if (resources.contains({ D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+                        constant.registerSpace, constant.shaderRegister })) {
+                    mMessages.insert(mItemId, MessageType::ScriptError,
+                        "DXR global/local constant registers overlap");
+                    return false;
+                }
 
     if (!ranges.empty()) {
         mDescriptorTableEntries.push_back(descriptorHeapOffset);
