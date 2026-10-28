@@ -104,6 +104,10 @@ report an error. Record arguments follow parameter order; local constants and
 global bindings must not overlap. Instance hit-group contributions select records,
 not byte offsets.
 
+Compute calls can select an acceleration structure for HLSL inline ray queries
+with Direct3D and DXC. The structure is bound through the existing resource
+binding path; select shader model 6.5 or later when using `RayQuery`.
+
 ### Items
 A session is built from the following items:
 
