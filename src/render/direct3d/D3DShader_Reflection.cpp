@@ -580,6 +580,25 @@ Reflection generateNodeReflection(ID3D12LibraryReflection *reflection)
 
     auto builder = std::make_unique<Reflection::Builder>();
     builder->shaderStage = getShaderStage(Shader::ShaderType::Node);
+    const auto sameBlockLayout = [](const auto &self, const auto &left,
+                                     const auto &right) -> bool {
+        const auto layout = [](const auto &block) {
+            return std::tie(block.name, block.offset, block.size,
+                block.typeName, block.typeFlags, block.decorationFlags,
+                block.numeric.scalar.width, block.numeric.scalar.signedness,
+                block.numeric.vector.component_count,
+                block.numeric.matrix.row_count,
+                block.numeric.matrix.column_count, block.numeric.matrix.stride,
+                block.array.dims_count, block.array.stride);
+        };
+        return layout(left) == layout(right)
+            && std::equal(left.array.dims,
+                left.array.dims + left.array.dims_count, right.array.dims)
+            && left.members.size() == right.members.size()
+            && std::equal(left.members.begin(), left.members.end(),
+                right.members.begin(),
+                [&](const auto &a, const auto &b) { return self(self, a, b); });
+    };
     for (auto i = 0u; i < libraryDesc.FunctionCount; ++i) {
         auto function = reflection->GetFunctionByIndex(i);
         if (!function)
@@ -601,8 +620,10 @@ Reflection generateNodeReflection(ID3D12LibraryReflection *reflection)
                 if (std::tie(existing->name, existing->typeName,
                         existing->count, existing->block.size,
                         existing->userType)
-                    != std::tie(binding.name, binding.typeName, binding.count,
-                        binding.block.size, binding.userType))
+                        != std::tie(binding.name, binding.typeName,
+                            binding.count, binding.block.size, binding.userType)
+                    || !sameBlockLayout(sameBlockLayout, existing->block,
+                        binding.block))
                     return {};
             } else {
                 builder->descriptorsBindings.push_back(std::move(binding));
