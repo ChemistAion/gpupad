@@ -426,7 +426,7 @@ void D3DCall::executeGraph(D3DContext &context, MessageList &messages,
         return;
     if (mInputStride <= 0 || offset > data->size()
         || size > static_cast<UINT64>(data->size() - offset)) {
-        messages.insert(mCall.id, MessageType::CallFailed,
+        messages.insert(mCall.id, MessageType::ScriptError,
             "Invalid work graph input block");
         return;
     }

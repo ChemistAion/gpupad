@@ -101,7 +101,8 @@ bool D3DShader::compile(const Session &session, const QString &source)
     };
     return ShaderCompiler::compileDXIL(session, input, mMessages, mBinary,
         mD3DReflection,
-        mType == Shader::ShaderType::Node ? &mLibraryReflection : nullptr);
+        mType == Shader::ShaderType::Node ? std::addressof(mLibraryReflection)
+                                          : nullptr);
 }
 
 QStringList D3DShader::preprocessorDefinitions() const

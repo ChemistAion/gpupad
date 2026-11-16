@@ -361,7 +361,7 @@ bool D3DPipeline::createWorkGraph(D3DContext &context)
     }
     const auto shader = mProgram.getShader(Shader::ShaderType::Node);
     if (!shader || mProgram.shaders().size() != 1 || !shader->binary()) {
-        mMessages.insert(mItemId, MessageType::CreatingPipelineFailed,
+        mMessages.insert(mItemId, MessageType::ScriptError,
             "Work graphs require one node library");
         return false;
     }
@@ -393,7 +393,7 @@ bool D3DPipeline::createWorkGraph(D3DContext &context)
     const auto result =
         device->CreateStateObject(&desc, IID_PPV_ARGS(&mWorkGraphStateObject));
     if (FAILED(result)) {
-        mMessages.insert(mItemId, MessageType::CreatingPipelineFailed,
+        mMessages.insert(mItemId, MessageType::ScriptError,
             QStringLiteral("Work graph HRESULT 0x%1")
                 .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0')));
         return false;
@@ -408,7 +408,7 @@ bool D3DPipeline::createWorkGraph(D3DContext &context)
     }
     const auto index = properties->GetWorkGraphIndex(L"main");
     if (index == UINT_MAX) {
-        mMessages.insert(mItemId, MessageType::CreatingPipelineFailed,
+        mMessages.insert(mItemId, MessageType::ScriptError,
             "Work graph program not found");
         mWorkGraphStateObject.Reset();
         return false;
@@ -417,7 +417,7 @@ bool D3DPipeline::createWorkGraph(D3DContext &context)
     const auto entry = D3D12_NODE_ID{ name.c_str(), 0 };
     mWorkGraphEntryIndex = properties->GetEntrypointIndex(index, entry);
     if (mWorkGraphEntryIndex == UINT_MAX) {
-        mMessages.insert(mItemId, MessageType::CreatingPipelineFailed,
+        mMessages.insert(mItemId, MessageType::ScriptError,
             "Work graph entry node not found");
         mWorkGraphStateObject.Reset();
         return false;
@@ -457,7 +457,7 @@ bool D3DPipeline::dispatchGraph(D3DContext &context, ScriptEngine &scriptEngine,
         return false;
     }
     if (stride < mWorkGraphRecordSize || stride % 4) {
-        mMessages.insert(mItemId, MessageType::CallFailed,
+        mMessages.insert(mItemId, MessageType::ScriptError,
             "Work graph input record stride does not match entry");
         return false;
     }
