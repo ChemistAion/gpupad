@@ -130,6 +130,7 @@ public:
         CallInstanceCount,
         CallBaseInstance,
         CallIndirectBufferBlockId,
+        CallInputBufferBlockId,
         CallDrawCount,
         CallWorkGroupsX,
         CallWorkGroupsY,

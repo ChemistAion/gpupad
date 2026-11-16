@@ -237,6 +237,7 @@ namespace ItemEnums {
         RayClosestHit,
         RayMiss,
         RayCallable,
+        Node,
     };
     Q_ENUM_NS(ShaderType)
 
@@ -471,7 +472,7 @@ namespace ItemEnums2 {
         CopyBuffer,
         SwapBuffers,
         ComputeSound,
-
+        DispatchGraph,
     };
     Q_ENUM_NS(CallType)
 

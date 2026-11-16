@@ -260,6 +260,7 @@ struct Call : Item
     QString baseInstance{ "0" };
 
     ItemId indirectBufferBlockId{ };
+    ItemId inputBufferBlockId{};
     QString drawCount{ "1" };
 
     QString patchVertices{ "3" };
@@ -342,6 +343,7 @@ struct CallKind
     bool compute;
     bool sound;
     bool trace;
+    bool graph;
 };
 
 Item::Type getItemTypeByName(const QString &name, bool *ok = nullptr);

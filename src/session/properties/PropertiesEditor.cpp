@@ -698,6 +698,7 @@ IEditor *PropertiesEditor::openItemEditor(const QModelIndex &index)
         case Call::CallType::Compute:
         case Call::CallType::ComputeIndirect:
         case Call::CallType::ComputeSound:
+        case Call::CallType::DispatchGraph:
             return openItemEditor(
                 mModel.getIndex(mModel.findItem(call->programId)));
         case Call::CallType::TraceRays:

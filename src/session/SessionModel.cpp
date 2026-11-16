@@ -814,7 +814,8 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
         const auto &call = static_cast<const Call &>(item);
         const auto kind = getKind(call);
         const auto callType = call.callType;
-        result &= (column != CallProgramId || kind.draw || kind.compute);
+        result &= (column != CallProgramId || kind.draw || kind.compute
+            || kind.graph);
         result &= (column != CallShaderTableId || kind.trace);
         result &= (column != CallTargetId || kind.draw);
         result &= (column != CallVertexStreamId || (kind.draw && !kind.mesh));
@@ -832,6 +833,7 @@ bool SessionModel::shouldSerializeColumn(const Item &item,
         result &= (column != CallBaseVertex
             || (kind.draw && kind.indexed && !kind.mesh && !kind.indirect));
         result &= (column != CallIndirectBufferBlockId || kind.indirect);
+        result &= (column != CallInputBufferBlockId || kind.graph);
         result &= (column != CallDrawCount || (kind.draw && kind.indirect));
         result &= (column != CallWorkGroupsX
             || ((kind.compute || kind.mesh || kind.trace) && !kind.indirect
