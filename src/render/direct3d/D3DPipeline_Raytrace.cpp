@@ -206,9 +206,12 @@ bool D3DPipeline::createRayTracing(D3DContext &context)
             .CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
     pipelineConfig->Config(2);
 
-    if (FAILED(device->CreateStateObject(stateObject,
-            IID_PPV_ARGS(&mRayTracingStateObject)))) {
-        mMessages.insert(mItemId, MessageType::CreatingPipelineFailed);
+    const auto result = device->CreateStateObject(stateObject,
+        IID_PPV_ARGS(&mRayTracingStateObject));
+    if (FAILED(result)) {
+        mMessages.insert(mItemId, MessageType::ScriptError,
+            QStringLiteral("Ray tracing pipeline HRESULT 0x%1")
+                .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0')));
         return false;
     }
 
