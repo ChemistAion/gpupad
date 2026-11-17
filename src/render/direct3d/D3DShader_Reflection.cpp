@@ -1,5 +1,6 @@
 
 #include "D3DShader.h"
+#include <type_traits>
 
 namespace {
     uint32_t getTypeSize(D3D_SHADER_VARIABLE_TYPE type)
@@ -317,8 +318,10 @@ namespace {
     }
 } // namespace
 
-Reflection generateSpirvReflection(Shader::ShaderType shaderType,
-    const Reflection &spirvReflection, ID3D12ShaderReflection *reflection)
+template <typename SourceReflection>
+static std::unique_ptr<Reflection::Builder> generateReflectionBuilder(
+    Shader::ShaderType shaderType, const Reflection &spirvReflection,
+    SourceReflection *reflection)
 {
     using BlockVariable = Reflection::Builder::BlockVariable;
     using InterfaceVariable = Reflection::Builder::InterfaceVariable;
@@ -327,38 +330,44 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
     auto builder = std::make_unique<Reflection::Builder>();
     builder->shaderStage = getShaderStage(shaderType);
 
-    auto shaderDesc = D3D12_SHADER_DESC{ };
-    reflection->GetDesc(&shaderDesc);
+    auto shaderDesc = std::conditional_t<
+        std::is_same_v<SourceReflection, ID3D12ShaderReflection>,
+        D3D12_SHADER_DESC, D3D12_FUNCTION_DESC>{};
+    if (FAILED(reflection->GetDesc(&shaderDesc)))
+        return {};
 
-    const auto createInterfaceVariable =
-        [](const D3D12_SIGNATURE_PARAMETER_DESC &paramDesc) {
-            return InterfaceVariable{
-                .semantic = (paramDesc.SemanticIndex == 0
-                        ? paramDesc.SemanticName
-                        : std::format("{}{}", paramDesc.SemanticName,
-                              paramDesc.SemanticIndex)),
-                .builtIn = getBuiltIn(paramDesc.SystemValueType),
-                .format = getFormat(paramDesc.ComponentType,
-                    std::popcount(paramDesc.Mask)),
-                .location = paramDesc.Register,
+    if constexpr (std::is_same_v<SourceReflection, ID3D12ShaderReflection>) {
+        const auto createInterfaceVariable =
+            [](const D3D12_SIGNATURE_PARAMETER_DESC &paramDesc) {
+                return InterfaceVariable{
+                    .semantic = (paramDesc.SemanticIndex == 0
+                            ? paramDesc.SemanticName
+                            : std::format("{}{}", paramDesc.SemanticName,
+                                  paramDesc.SemanticIndex)),
+                    .builtIn = getBuiltIn(paramDesc.SystemValueType),
+                    .format = getFormat(paramDesc.ComponentType,
+                        std::popcount(paramDesc.Mask)),
+                    .location = paramDesc.Register,
+                };
             };
-        };
 
-    for (auto i = 0u; i < shaderDesc.InputParameters; ++i) {
-        auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
-        reflection->GetInputParameterDesc(i, &paramDesc);
-        builder->inputs.push_back(createInterfaceVariable(paramDesc));
-    }
+        for (auto i = 0u; i < shaderDesc.InputParameters; ++i) {
+            auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{};
+            reflection->GetInputParameterDesc(i, &paramDesc);
+            builder->inputs.push_back(createInterfaceVariable(paramDesc));
+        }
 
-    for (auto i = 0u; i < shaderDesc.OutputParameters; ++i) {
-        auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
-        reflection->GetOutputParameterDesc(i, &paramDesc);
-        builder->outputs.push_back(createInterfaceVariable(paramDesc));
+        for (auto i = 0u; i < shaderDesc.OutputParameters; ++i) {
+            auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{};
+            reflection->GetOutputParameterDesc(i, &paramDesc);
+            builder->outputs.push_back(createInterfaceVariable(paramDesc));
+        }
     }
 
     for (auto i = 0u; i < shaderDesc.BoundResources; ++i) {
         auto bindDesc = D3D12_SHADER_INPUT_BIND_DESC{ };
-        reflection->GetResourceBindingDesc(i, &bindDesc);
+        if (FAILED(reflection->GetResourceBindingDesc(i, &bindDesc)))
+            return {};
         const auto array = getArrayTraits(bindDesc);
         switch (bindDesc.Type) {
         case D3D_SIT_CBUFFER: {
@@ -366,7 +375,8 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                 findSpirvDescriptorBinding(spirvReflection, bindDesc.Name);
             auto cbuffer = reflection->GetConstantBufferByName(bindDesc.Name);
             auto cbufferDesc = D3D12_SHADER_BUFFER_DESC{ };
-            cbuffer->GetDesc(&cbufferDesc);
+            if (FAILED(cbuffer->GetDesc(&cbufferDesc)))
+                return {};
 
             auto variables = std::vector<BlockVariable>();
             for (auto j = 0u; j < cbufferDesc.Variables; ++j) {
@@ -407,7 +417,9 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                             size += arrayStride * (memberTypeDesc.Elements - 1);
 
                         auto& member = members.emplace_back(BlockVariable{
-                            .name = "m" + std::to_string(i),
+                            .name = (std::is_same_v<SourceReflection, ID3D12FunctionReflection>
+                                ? std::string(type->GetMemberTypeName(i))
+                                : "m" + std::to_string(i)),
                             .offset = memberTypeDesc.Offset,
                             .size = size,
                             .typeName = memberTypeDesc.Name,
@@ -546,6 +558,91 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                 .count = bindDesc.BindCount,
             });
             break;
+        }
+    }
+    return builder;
+}
+
+Reflection generateSpirvReflection(Shader::ShaderType shaderType,
+    const Reflection &spirvReflection, ID3D12ShaderReflection *reflection)
+{
+    return Reflection(
+        generateReflectionBuilder(shaderType, spirvReflection, reflection));
+}
+
+Reflection generateLibraryReflection(Shader::ShaderType shaderType,
+    ID3D12LibraryReflection *reflection)
+{
+    auto desc = D3D12_LIBRARY_DESC{};
+    if (!reflection || FAILED(reflection->GetDesc(&desc))
+        || !desc.FunctionCount)
+        return {};
+
+    auto builder = std::make_unique<Reflection::Builder>();
+    builder->shaderStage = getShaderStage(shaderType);
+    const auto sameBlock = [](const auto &self, const auto &a,
+                               const auto &b) -> bool {
+        const auto layout = [](const auto &v) {
+            return std::tie(v.name, v.offset, v.size, v.typeName, v.typeFlags,
+                v.decorationFlags, v.numeric.scalar.width,
+                v.numeric.scalar.signedness, v.numeric.vector.component_count,
+                v.numeric.matrix.row_count, v.numeric.matrix.column_count,
+                v.numeric.matrix.stride, v.array.dims_count, v.array.stride);
+        };
+        return layout(a) == layout(b)
+            && std::equal(a.array.dims, a.array.dims + a.array.dims_count,
+                b.array.dims)
+            && a.members.size() == b.members.size()
+            && std::equal(a.members.begin(), a.members.end(), b.members.begin(),
+                [&](const auto &x, const auto &y) { return self(self, x, y); });
+    };
+    const auto registerClass = [](const auto &binding) {
+        switch (binding.descriptorType) {
+        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER: return 'b';
+        case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:        return 's';
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            return binding.decorationFlags & SPV_REFLECT_DECORATION_NON_WRITABLE
+                ? 't'
+                : 'u';
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER: return 'u';
+        default:                                               return 't';
+        }
+    };
+    const auto imageType = [](const auto &v) {
+        return std::tie(v.image.dim, v.image.depth, v.image.arrayed, v.image.ms,
+            v.image.sampled, v.image.image_format);
+    };
+    for (auto i = 0u; i < desc.FunctionCount; ++i) {
+        const auto function = reflection->GetFunctionByIndex(i);
+        if (!function)
+            return {};
+        auto bindings =
+            generateReflectionBuilder(shaderType, Reflection{}, function);
+        if (!bindings)
+            return {};
+        for (auto &binding : bindings->descriptorsBindings) {
+            const auto found =
+                std::find_if(builder->descriptorsBindings.begin(),
+                    builder->descriptorsBindings.end(), [&](const auto &other) {
+                        return other.set == binding.set
+                            && other.binding == binding.binding
+                            && registerClass(other) == registerClass(binding);
+                    });
+            if (found == builder->descriptorsBindings.end()) {
+                builder->descriptorsBindings.push_back(std::move(binding));
+            } else if (std::tie(found->name, found->typeName,
+                           found->descriptorType, found->typeFlags,
+                           found->decorationFlags, found->count,
+                           found->userType)
+                    != std::tie(binding.name, binding.typeName,
+                        binding.descriptorType, binding.typeFlags,
+                        binding.decorationFlags, binding.count,
+                        binding.userType)
+                || imageType(*found) != imageType(binding)
+                || !sameBlock(sameBlock, found->block, binding.block)) {
+                return {};
+            }
         }
     }
     return Reflection(std::move(builder));
