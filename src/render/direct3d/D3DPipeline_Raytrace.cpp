@@ -209,9 +209,18 @@ bool D3DPipeline::createRayTracing(D3DContext &context)
     const auto result = device->CreateStateObject(stateObject,
         IID_PPV_ARGS(&mRayTracingStateObject));
     if (FAILED(result)) {
+        auto shaderModel =
+            D3D12_FEATURE_DATA_SHADER_MODEL{ D3D_SHADER_MODEL_6_9 };
+        const auto modelResult = context.device.CheckFeatureSupport(
+            D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel));
         mMessages.insert(mItemId, MessageType::ScriptError,
-            QStringLiteral("Ray tracing pipeline HRESULT 0x%1")
-                .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0')));
+            QStringLiteral(
+                "Ray tracing pipeline HRESULT 0x%1; SM query 0x%2, model 0x%3")
+                .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0'))
+                .arg(static_cast<UINT>(modelResult), 8, 16, QLatin1Char('0'))
+                .arg(SUCCEEDED(modelResult) ? shaderModel.HighestShaderModel
+                                            : 0,
+                    0, 16));
         return false;
     }
 
