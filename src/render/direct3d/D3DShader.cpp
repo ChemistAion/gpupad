@@ -76,6 +76,19 @@ bool D3DShader::compile(PrintfBase &printf)
     if (!compile(mSession, patchedSources.join("\n")))
         return false;
 
+    if (mLibraryReflection) {
+        mReflection =
+            generateLibraryReflection(mType, mLibraryReflection.Get());
+        if (!mReflection) {
+            mMessages.insert(mItemId, MessageType::ShaderError,
+                "Cannot represent ray library resource bindings");
+            mBinary.Reset();
+            mLibraryReflection.Reset();
+            return false;
+        }
+        return true;
+    }
+
     // also generate SPIR-V for completing type information missing in D3D reflection
     const auto spirv = compileSpirv(printf);
     const auto spirvReflection = Reflection(spirv);
@@ -101,8 +114,10 @@ bool D3DShader::compile(const Session &session, const QString &source)
     };
     return ShaderCompiler::compileDXIL(session, input, mMessages, mBinary,
         mD3DReflection,
-        mType == Shader::ShaderType::Node ? std::addressof(mLibraryReflection)
-                                          : nullptr);
+        (mType == Shader::ShaderType::Node
+            || ShaderCompiler::usesShaderModel69(mSession))
+            ? std::addressof(mLibraryReflection)
+            : nullptr);
 }
 
 QStringList D3DShader::preprocessorDefinitions() const

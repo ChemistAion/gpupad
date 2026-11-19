@@ -34,6 +34,23 @@ bool D3DPipeline::createRayTracing(D3DContext &context)
         mMessages.insert(itemId, MessageType::ScriptError, text);
         return false;
     };
+    const auto usesShaderModel69 =
+        ShaderCompiler::usesShaderModel69(mProgram.session());
+    if (usesShaderModel69) {
+        auto model = D3D12_FEATURE_DATA_SHADER_MODEL{ D3D_SHADER_MODEL_6_9 };
+        const auto result = device->CheckFeatureSupport(
+            D3D12_FEATURE_SHADER_MODEL, &model, sizeof(model));
+        if (FAILED(result))
+            return fail(mItemId,
+                QStringLiteral("Cannot query Shader Model 6.9 (HRESULT 0x%1)")
+                    .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0')));
+        if (model.HighestShaderModel < D3D_SHADER_MODEL_6_9)
+            return fail(mItemId,
+                QStringLiteral("Ray tracing requires Shader Model 6.9, device "
+                               "reports %1.%2")
+                    .arg(static_cast<UINT>(model.HighestShaderModel) >> 4)
+                    .arg(static_cast<UINT>(model.HighestShaderModel) & 0xf));
+    }
     const auto getShader = [&](ItemId shaderId, Shader::ShaderType type,
                                const QString &role) -> const D3DShader * {
         const auto shader = mProgram.getShader(shaderId);
@@ -206,8 +223,14 @@ bool D3DPipeline::createRayTracing(D3DContext &context)
             .CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
     pipelineConfig->Config(2);
 
-    if (FAILED(device->CreateStateObject(stateObject,
-            IID_PPV_ARGS(&mRayTracingStateObject)))) {
+    const auto result = device->CreateStateObject(stateObject,
+        IID_PPV_ARGS(&mRayTracingStateObject));
+    if (FAILED(result)) {
+        if (usesShaderModel69)
+            return fail(mItemId,
+                QStringLiteral(
+                    "Cannot create ray tracing pipeline (HRESULT 0x%1)")
+                    .arg(static_cast<UINT>(result), 8, 16, QLatin1Char('0')));
         mMessages.insert(mItemId, MessageType::CreatingPipelineFailed);
         return false;
     }

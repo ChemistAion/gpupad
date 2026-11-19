@@ -33,5 +33,7 @@ private:
 Reflection generateSpirvReflection(Shader::ShaderType shaderType,
     const Reflection &spirvReflection, ID3D12ShaderReflection *reflection);
 Reflection generateNodeReflection(ID3D12LibraryReflection *reflection);
+Reflection generateLibraryReflection(Shader::ShaderType shaderType,
+    ID3D12LibraryReflection *reflection);
 
 #endif // D3D_ENABLED
