@@ -394,7 +394,7 @@ static std::unique_ptr<Reflection::Builder> generateReflectionBuilder(
                     return { };
 
                 const auto createTypeMembers =
-                    [](const auto &createTypeMembers,
+                    [nativeRayLibrary](const auto &createTypeMembers,
                         ID3D12ShaderReflectionType *type)
                     -> std::optional<std::vector<BlockVariable>> {
                     auto typeDesc = D3D12_SHADER_TYPE_DESC{ };
