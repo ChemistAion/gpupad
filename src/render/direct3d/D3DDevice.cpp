@@ -4,6 +4,12 @@
 
 #  include "message/MessageList.h"
 
+extern "C" {
+// select the app-local retail runtime for the SER PoC
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 619;
+__declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
+}
+
 namespace {
 #  if !defined(NDEBUG)
     const bool sDebugLayerEnabled = [] {
