@@ -1,0 +1,67 @@
+{
+  "type": "Session",
+  "id": 1,
+  "name": "Shader Execution Reordering",
+  "renderer": "Direct3D",
+  "apiVersion": "1.2",
+  "shaderLanguage": "HLSL",
+  "shaderCompiler": "DXC",
+  "shaderCompilerSettings": {"shaderModel": "6.9"},
+  "items": [
+    {
+      "type": "Buffer", "id": 2, "name": "Vertices",
+      "items": [{
+        "type": "Block", "id": 3, "name": "Position", "offset": "0", "rowCount": "3",
+        "items": [{"type": "Field", "id": 4, "name": "Position", "dataType": "Float", "count": 3}]
+      }]
+    },
+    {
+      "type": "Buffer", "id": 5, "name": "Results",
+      "items": [{
+        "type": "Block", "id": 6, "name": "Rays", "offset": "0", "rowCount": "8",
+        "items": [
+          {"type": "Field", "id": 7, "name": "Hit", "dataType": "Uint32", "count": 1},
+          {"type": "Field", "id": 8, "name": "Invoked", "dataType": "Uint32", "count": 1}
+        ]
+      }]
+    },
+    {"type": "Script", "id": 9, "name": "Generate Scene", "fileName": "generateScene.js", "executeOn": "ResetEvaluation"},
+    {
+      "type": "GeometrySet", "id": 10, "name": "Triangle Geometry",
+      "items": [{"type": "Geometry", "id": 11, "name": "Triangle", "geometryType": "Triangles", "vertexBufferBlockId": 3, "count": "1", "offset": "0", "opaque": true}]
+    },
+    {
+      "type": "AccelerationStructure", "id": 12, "name": "Scene",
+      "items": [{
+        "type": "Instance", "id": 13, "name": "Triangle", "geometrySetId": 10,
+        "transform": "[1,0,0,0,0,1,0,0,0,0,1,0]", "shaderInstanceId": "0",
+        "visibilityMask": "255", "hitGroupRecordOffset": "0", "triangleCulling": false,
+        "frontFace": "CW", "opacityMode": "GeometryDefault"
+      }]
+    },
+    {"type": "Binding", "id": 14, "name": "Results", "bindingType": "Buffer", "bufferId": 5},
+    {"type": "Binding", "id": 15, "name": "Scene", "bindingType": "AccelerationStructure", "accelerationStructureId": 12},
+    {"type": "Binding", "id": 16, "name": "Settings.requestReorder", "bindingType": "Uniform", "values": ["1"]},
+    {
+      "type": "Program", "id": 17, "name": "Program",
+      "items": [
+        {"type": "Shader", "id": 18, "name": "Ray Generation", "fileName": "RayGeneration.hlsl", "shaderType": "RayGeneration", "entryPoint": "RayGeneration"},
+        {"type": "Shader", "id": 19, "name": "Miss", "fileName": "RayMiss.hlsl", "shaderType": "RayMiss", "entryPoint": "RayMiss"},
+        {"type": "Shader", "id": 20, "name": "Closest Hit", "fileName": "RayClosestHit.hlsl", "shaderType": "RayClosestHit", "entryPoint": "RayClosestHit"}
+      ]
+    },
+    {
+      "type": "ShaderTable", "id": 21, "name": "Shader Table", "programId": 17,
+      "items": [
+        {"type": "Record", "id": 22, "name": "Ray Generation", "recordType": "RayGeneration", "shaderId": 18},
+        {"type": "Record", "id": 23, "name": "Miss", "recordType": "Miss", "shaderId": 19},
+        {"type": "Record", "id": 24, "name": "Hit", "recordType": "Hit", "closestHitShaderId": 20}
+      ]
+    },
+    {
+      "type": "Call", "id": 25, "name": "Trace Rays", "callType": "TraceRays",
+      "shaderTableId": 21, "workGroupsX": "4", "workGroupsY": "1", "workGroupsZ": "1",
+      "executeOn": "EveryEvaluation"
+    }
+  ]
+}
