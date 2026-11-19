@@ -32,6 +32,8 @@ public:
         UINT count, UINT stride, const void *records);
     bool bindRayTracing(D3DContext &context, ScriptEngine &scriptEngine);
     void dispatchRays(D3DContext &context, UINT width, UINT height, UINT depth);
+    D3D12_DISPATCH_RAYS_DESC getDispatchRaysDesc(UINT width, UINT height,
+        UINT depth) const;
     void bindVertexBuffers(D3DContext &context);
 
 private:

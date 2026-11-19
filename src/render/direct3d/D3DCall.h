@@ -46,6 +46,8 @@ private:
         ScriptEngine &scriptEngine);
     void executeTraceRays(D3DContext &context, MessageList &messages,
         ScriptEngine &scriptEngine);
+    void executeTraceRaysIndirect(D3DContext &context,
+        ScriptEngine &scriptEngine);
     void executeClearTexture(D3DContext &context, MessageList &messages);
     void executeCopyTexture(D3DContext &context, MessageList &messages);
     void executeClearBuffer(D3DContext &context, MessageList &messages);
@@ -85,6 +87,7 @@ private:
     QString mInputRowCount;
     int mInputStride{};
     QByteArray mInputRecords;
+    ComPtr<ID3D12Resource> mIndirectRayArguments;
 
     QSet<ItemId> mUsedItems;
     std::unique_ptr<D3DPipeline> mPipeline;

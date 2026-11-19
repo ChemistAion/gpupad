@@ -69,6 +69,7 @@ int getIndirectCommandSize(Call::CallType callType)
     case Call::CallType::DrawIndexedIndirect:   return 5 * sizeof(uint32_t);
     case Call::CallType::DrawMeshTasksIndirect: return 3 * sizeof(uint32_t);
     case Call::CallType::ComputeIndirect:       return 3 * sizeof(uint32_t);
+    case Call::CallType::TraceRaysIndirect:     return 3 * sizeof(uint32_t);
     default:                                    return 0;
     }
 }
@@ -138,6 +139,9 @@ CallKind getKind(const Call &call)
     case Call::CallType::ComputeSound: kind.compute = kind.sound = true; break;
     case Call::CallType::TraceRays:    kind.trace = true; break;
     case Call::CallType::DispatchGraph: kind.graph = true; break;
+    case Call::CallType::TraceRaysIndirect:
+        kind.trace = kind.indirect = true;
+        break;
     default:                           break;
     }
 
@@ -179,7 +183,9 @@ bool callTypeSupportsShaderType(Call::CallType callType,
     case Call::CallType::ComputeSound:
         return (shaderType == Shader::ShaderType::Compute);
 
-    case Call::CallType::TraceRays: return isRayTracingShaderType(shaderType);
+    case Call::CallType::TraceRays:
+    case Call::CallType::TraceRaysIndirect:
+        return isRayTracingShaderType(shaderType);
     case Call::CallType::DispatchGraph:
         return shaderType == Shader::ShaderType::Node;
     default:                        return false;

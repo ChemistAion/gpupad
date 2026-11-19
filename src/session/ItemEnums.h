@@ -481,6 +481,7 @@ namespace ItemEnums2 {
         SwapBuffers,
         ComputeSound,
         DispatchGraph,
+        TraceRaysIndirect,
     };
     Q_ENUM_NS(CallType)
 
