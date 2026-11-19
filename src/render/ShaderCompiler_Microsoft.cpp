@@ -217,7 +217,8 @@ namespace ShaderCompiler {
 
             bool compile(ArgumentList &arguments, const Input &input,
                 MessageList &messages, ComPtr<ID3DBlob> &binary,
-                ComPtr<ID3D12ShaderReflection> *d3dReflection = nullptr)
+                ComPtr<ID3D12ShaderReflection> *d3dReflection = nullptr,
+                ComPtr<ID3D12LibraryReflection> *libraryReflection = nullptr)
             {
                 if (!mCompiler)
                     return false;
@@ -255,16 +256,35 @@ namespace ShaderCompiler {
                     IID_PPV_ARGS(binary.GetAddressOf()), nullptr));
                 Q_ASSERT(binary->GetBufferSize() > 0);
 
-                if (d3dReflection) {
+                if (d3dReflection || libraryReflection) {
                     auto reflectionData = ComPtr<ID3DBlob>();
-                    AssertIfFailed(compileResult->GetOutput(DXC_OUT_REFLECTION,
-                        IID_PPV_ARGS(reflectionData.GetAddressOf()), nullptr));
+                    if (FAILED(compileResult->GetOutput(DXC_OUT_REFLECTION,
+                            IID_PPV_ARGS(reflectionData.GetAddressOf()),
+                            nullptr))
+                        || !reflectionData) {
+                        messages.insert(input.itemId, MessageType::ShaderError,
+                            "DXIL reflection data is unavailable");
+                        binary.Reset();
+                        return false;
+                    }
                     auto reflectionBuffer = DxcBuffer{ };
                     reflectionBuffer.Ptr = reflectionData->GetBufferPointer();
                     reflectionBuffer.Size = reflectionData->GetBufferSize();
                     reflectionBuffer.Encoding = DXC_CP_ACP;
-                    AssertIfFailed(mUtils->CreateReflection(&reflectionBuffer,
-                        IID_PPV_ARGS(d3dReflection->GetAddressOf())));
+                    const auto result = (libraryReflection
+                            ? mUtils->CreateReflection(&reflectionBuffer,
+                                  IID_PPV_ARGS(
+                                      libraryReflection->GetAddressOf()))
+                            : mUtils->CreateReflection(&reflectionBuffer,
+                                  IID_PPV_ARGS(d3dReflection->GetAddressOf())));
+                    if (FAILED(result)
+                        || (libraryReflection ? !*libraryReflection
+                                              : !*d3dReflection)) {
+                        messages.insert(input.itemId, MessageType::ShaderError,
+                            "Cannot reflect DXIL resources");
+                        binary.Reset();
+                        return false;
+                    }
                 }
                 return true;
             }
@@ -273,9 +293,12 @@ namespace ShaderCompiler {
         bool compile_DXC(const Session &session, const Input &input,
             DXCCompiler::ArgumentList &arguments, MessageList &messages,
             ComPtr<ID3DBlob> &binary,
-            ComPtr<ID3D12ShaderReflection> *d3dReflection = nullptr)
+            ComPtr<ID3D12ShaderReflection> *d3dReflection = nullptr,
+            ComPtr<ID3D12LibraryReflection> *libraryReflection = nullptr)
         {
             const auto rayTracing = isRayTracingShaderType(input.shaderType);
+            const auto reflectLibrary = rayTracing && libraryReflection
+                && usesShaderModel69(session);
             const auto shaderModel = getShaderModel(session, { 6, 5 });
             const auto minimumRayTracingShaderModel = Version{ 6, 3 };
             if (rayTracing && shaderModel < minimumRayTracingShaderModel) {
@@ -292,6 +315,10 @@ namespace ShaderCompiler {
 
             if (!rayTracing) {
                 arguments.add(L"-E");
+                arguments.add(input.entryPoint);
+            } else if (reflectLibrary) {
+                // reflect the same export that the shader table uses
+                arguments.add(L"-exports");
                 arguments.add(input.entryPoint);
             }
 
@@ -317,7 +344,7 @@ namespace ShaderCompiler {
             if (rayTracing) {
                 auto compiler = DXCCompiler{ };
                 return compiler.compile(arguments, input, messages, binary,
-                    nullptr);
+                    nullptr, reflectLibrary ? libraryReflection : nullptr);
             }
 
             static std::mutex sMutex;
@@ -328,6 +355,13 @@ namespace ShaderCompiler {
         }
 #endif // DXC_ENABLED
     } // namespace
+
+    bool usesShaderModel69(const Session &session)
+    {
+        return session.shaderCompiler == Session::ShaderCompiler::DXC
+            && session.shaderLanguage == Session::ShaderLanguage::HLSL
+            && getShaderModel(session, { 6, 5 }) == Version{ 6, 9 };
+    }
 
     bool compileDXIL_D3DCompiler(const Session &session, const Input &input,
         MessageList &messages, ComPtr<ID3DBlob> &binary,
@@ -372,13 +406,14 @@ namespace ShaderCompiler {
 
     bool compileDXIL(const Session &session, const Input &input,
         MessageList &messages, ComPtr<ID3DBlob> &binary,
-        ComPtr<ID3D12ShaderReflection> &d3dReflection)
+        ComPtr<ID3D12ShaderReflection> &d3dReflection,
+        ComPtr<ID3D12LibraryReflection> *libraryReflection)
     {
 #if defined(DXC_ENABLED)
         if (session.shaderCompiler == Session::ShaderCompiler::DXC) {
             auto arguments = DXCCompiler::ArgumentList{ };
             return compile_DXC(session, input, arguments, messages, binary,
-                &d3dReflection);
+                &d3dReflection, libraryReflection);
         }
 #endif // DXC_ENABLED
 

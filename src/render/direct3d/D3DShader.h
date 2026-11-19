@@ -26,10 +26,13 @@ private:
 
     ComPtr<ID3DBlob> mBinary;
     ComPtr<ID3D12ShaderReflection> mD3DReflection;
+    ComPtr<ID3D12LibraryReflection> mLibraryReflection;
     Reflection mReflection;
 };
 
 Reflection generateSpirvReflection(Shader::ShaderType shaderType,
     const Reflection &spirvReflection, ID3D12ShaderReflection *reflection);
+Reflection generateLibraryReflection(Shader::ShaderType shaderType,
+    ID3D12LibraryReflection *reflection);
 
 #endif // D3D_ENABLED

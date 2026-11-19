@@ -16,9 +16,12 @@ using Microsoft::WRL::ComPtr;
 
 namespace ShaderCompiler {
 
+    bool usesShaderModel69(const Session &session);
+
     bool compileDXIL(const Session &session, const Input &input,
         MessageList &messages, ComPtr<ID3DBlob> &binary,
-        ComPtr<ID3D12ShaderReflection> &d3dReflection);
+        ComPtr<ID3D12ShaderReflection> &d3dReflection,
+        ComPtr<ID3D12LibraryReflection> *libraryReflection = nullptr);
 
 }; // namespace ShaderCompiler
 

@@ -1,5 +1,7 @@
 
 #include "D3DShader.h"
+#include <optional>
+#include <type_traits>
 
 namespace {
     uint32_t getTypeSize(D3D_SHADER_VARIABLE_TYPE type)
@@ -218,7 +220,7 @@ namespace {
         }
     }
 
-    SpvReflectDescriptorType getDescriptorType(
+    std::optional<SpvReflectDescriptorType> getDescriptorType(
         const D3D12_SHADER_INPUT_BIND_DESC &bindDesc)
     {
         switch (bindDesc.Type) {
@@ -239,7 +241,7 @@ namespace {
             return SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         case D3D_SIT_RTACCELERATIONSTRUCTURE:
             return SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-        default: return SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        default: return { };
         }
     }
 
@@ -317,8 +319,10 @@ namespace {
     }
 } // namespace
 
-Reflection generateSpirvReflection(Shader::ShaderType shaderType,
-    const Reflection &spirvReflection, ID3D12ShaderReflection *reflection)
+template <typename SourceReflection>
+static std::unique_ptr<Reflection::Builder> generateReflectionBuilder(
+    Shader::ShaderType shaderType, const Reflection &spirvReflection,
+    SourceReflection *reflection)
 {
     using BlockVariable = Reflection::Builder::BlockVariable;
     using InterfaceVariable = Reflection::Builder::InterfaceVariable;
@@ -327,38 +331,45 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
     auto builder = std::make_unique<Reflection::Builder>();
     builder->shaderStage = getShaderStage(shaderType);
 
-    auto shaderDesc = D3D12_SHADER_DESC{ };
-    reflection->GetDesc(&shaderDesc);
+    auto shaderDesc = std::conditional_t<
+        std::is_same_v<SourceReflection, ID3D12ShaderReflection>,
+        D3D12_SHADER_DESC, D3D12_FUNCTION_DESC>{ };
+    if (FAILED(reflection->GetDesc(&shaderDesc)))
+        return { };
 
-    const auto createInterfaceVariable =
-        [](const D3D12_SIGNATURE_PARAMETER_DESC &paramDesc) {
-            return InterfaceVariable{
-                .semantic = (paramDesc.SemanticIndex == 0
-                        ? paramDesc.SemanticName
-                        : std::format("{}{}", paramDesc.SemanticName,
-                              paramDesc.SemanticIndex)),
-                .builtIn = getBuiltIn(paramDesc.SystemValueType),
-                .format = getFormat(paramDesc.ComponentType,
-                    std::popcount(paramDesc.Mask)),
-                .location = paramDesc.Register,
+    if constexpr (std::is_same_v<SourceReflection, ID3D12ShaderReflection>) {
+        const auto createInterfaceVariable =
+            [](const D3D12_SIGNATURE_PARAMETER_DESC &paramDesc) {
+                return InterfaceVariable{
+                    .semantic = (paramDesc.SemanticIndex == 0
+                            ? paramDesc.SemanticName
+                            : std::format("{}{}", paramDesc.SemanticName,
+                                  paramDesc.SemanticIndex)),
+                    .builtIn = getBuiltIn(paramDesc.SystemValueType),
+                    .format = getFormat(paramDesc.ComponentType,
+                        std::popcount(paramDesc.Mask)),
+                    .location = paramDesc.Register,
+                };
             };
-        };
 
-    for (auto i = 0u; i < shaderDesc.InputParameters; ++i) {
-        auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
-        reflection->GetInputParameterDesc(i, &paramDesc);
-        builder->inputs.push_back(createInterfaceVariable(paramDesc));
-    }
+        for (auto i = 0u; i < shaderDesc.InputParameters; ++i) {
+            auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
+            reflection->GetInputParameterDesc(i, &paramDesc);
+            builder->inputs.push_back(createInterfaceVariable(paramDesc));
+        }
 
-    for (auto i = 0u; i < shaderDesc.OutputParameters; ++i) {
-        auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
-        reflection->GetOutputParameterDesc(i, &paramDesc);
-        builder->outputs.push_back(createInterfaceVariable(paramDesc));
+        for (auto i = 0u; i < shaderDesc.OutputParameters; ++i) {
+            auto paramDesc = D3D12_SIGNATURE_PARAMETER_DESC{ };
+            reflection->GetOutputParameterDesc(i, &paramDesc);
+            builder->outputs.push_back(createInterfaceVariable(paramDesc));
+        }
     }
 
     for (auto i = 0u; i < shaderDesc.BoundResources; ++i) {
         auto bindDesc = D3D12_SHADER_INPUT_BIND_DESC{ };
-        reflection->GetResourceBindingDesc(i, &bindDesc);
+        if (FAILED(reflection->GetResourceBindingDesc(i, &bindDesc))
+            || !bindDesc.Name)
+            return { };
         const auto array = getArrayTraits(bindDesc);
         switch (bindDesc.Type) {
         case D3D_SIT_CBUFFER: {
@@ -366,37 +377,51 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                 findSpirvDescriptorBinding(spirvReflection, bindDesc.Name);
             auto cbuffer = reflection->GetConstantBufferByName(bindDesc.Name);
             auto cbufferDesc = D3D12_SHADER_BUFFER_DESC{ };
-            cbuffer->GetDesc(&cbufferDesc);
+            if (!cbuffer || FAILED(cbuffer->GetDesc(&cbufferDesc))
+                || !cbufferDesc.Name)
+                return { };
 
             auto variables = std::vector<BlockVariable>();
             for (auto j = 0u; j < cbufferDesc.Variables; ++j) {
                 auto var = cbuffer->GetVariableByIndex(j);
                 auto varDesc = D3D12_SHADER_VARIABLE_DESC{ };
-                var->GetDesc(&varDesc);
+                if (!var || FAILED(var->GetDesc(&varDesc)) || !varDesc.Name)
+                    return { };
 
                 auto varType = var->GetType();
                 auto varTypeDesc = D3D12_SHADER_TYPE_DESC{ };
-                varType->GetDesc(&varTypeDesc);
+                if (!varType || FAILED(varType->GetDesc(&varTypeDesc)))
+                    return { };
 
                 const auto createTypeMembers =
                     [](const auto &createTypeMembers,
                         ID3D12ShaderReflectionType *type)
-                    -> std::vector<BlockVariable> {
+                    -> std::optional<std::vector<BlockVariable>> {
                     auto typeDesc = D3D12_SHADER_TYPE_DESC{ };
-                    type->GetDesc(&typeDesc);
+                    if (FAILED(type->GetDesc(&typeDesc)))
+                        return { };
 
                     auto members = std::vector<BlockVariable>();
                     for (auto i = 0u; i < typeDesc.Members; ++i) {
                         auto memberType = type->GetMemberTypeByIndex(i);
                         auto memberTypeDesc = D3D12_SHADER_TYPE_DESC{ };
-                        memberType->GetDesc(&memberTypeDesc);
+                        if (!memberType
+                            || FAILED(memberType->GetDesc(&memberTypeDesc)))
+                            return { };
 
                         // https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/
                         auto subMembers =
                             createTypeMembers(createTypeMembers, memberType);
-                        const auto elementSize = (!subMembers.empty()
-                                ? subMembers.back().offset
-                                    + subMembers.back().size
+                        if (!subMembers)
+                            return { };
+                        const auto memberName = type->GetMemberTypeName(i);
+                        if constexpr (std::is_same_v<SourceReflection,
+                                          ID3D12FunctionReflection>)
+                            if (!memberName)
+                                return { };
+                        const auto elementSize = (!subMembers->empty()
+                                ? subMembers->back().offset
+                                    + subMembers->back().size
                                 : getTypeSize(memberTypeDesc));
                         const auto arrayStride = (memberTypeDesc.Elements
                                 ? alignUp(elementSize, 16)
@@ -406,8 +431,12 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                         if (memberTypeDesc.Elements > 1)
                             size += arrayStride * (memberTypeDesc.Elements - 1);
 
-                        auto& member = members.emplace_back(BlockVariable{
-                            .name = "m" + std::to_string(i),
+                        auto name = "m" + std::to_string(i);
+                        if constexpr (std::is_same_v<SourceReflection,
+                                          ID3D12FunctionReflection>)
+                            name = memberName;
+                        auto &member = members.emplace_back(BlockVariable{
+                            .name = std::move(name),
                             .offset = memberTypeDesc.Offset,
                             .size = size,
                             .typeName = memberTypeDesc.Name,
@@ -418,23 +447,26 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                                 .dims = { static_cast<uint32_t>(memberTypeDesc.Elements) },
                                 .stride = arrayStride,
                             },
-                            .members = std::move(subMembers),
+                            .members = std::move(*subMembers),
                         });
                     }
                     return members;
                 };
 
                 auto members = createTypeMembers(createTypeMembers, varType);
-                const auto elementSize = (!members.empty()
-                        ? members.back().offset + members.back().size
+                if (!members)
+                    return { };
+                const auto elementSize = (!members->empty()
+                        ? members->back().offset + members->back().size
                         : getTypeSize(varTypeDesc.Type));
 
                 const auto isUserType = (varTypeDesc.Type == D3D_SVT_VOID);
-                auto& variable = variables.emplace_back(BlockVariable{
+                auto &variable = variables.emplace_back(BlockVariable{
                     .name = varDesc.Name,
                     .offset = varDesc.StartOffset,
                     .size = varDesc.Size,
-                    .typeName = (isUserType ? varTypeDesc.Name : ""),
+                    .typeName =
+                        (isUserType && varTypeDesc.Name ? varTypeDesc.Name : ""),
                     .typeFlags = getTypeFlags(varTypeDesc),
                     .numeric = getNumericTraits(varTypeDesc),
                     .array = {
@@ -442,7 +474,7 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
                         .dims = { static_cast<uint32_t>(varTypeDesc.Elements) },
                         .stride = (varTypeDesc.Elements ? alignUp(elementSize, 16) : 0),
                     },
-                    .members = std::move(members)
+                    .members = std::move(*members)
                 });
             }
 
@@ -492,7 +524,13 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
         } break;
 
         default: {
-            const auto descriptorType = getDescriptorType(bindDesc);
+            const auto type = getDescriptorType(bindDesc);
+            if constexpr (
+                std::is_same_v<SourceReflection, ID3D12FunctionReflection>)
+                if (!type)
+                    return { };
+            const auto descriptorType =
+                type.value_or(SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
             const auto spirvBinding =
                 findSpirvDescriptorBinding(spirvReflection, bindDesc.Name);
             const auto mappedTypeName = (spirvBinding && spirvBinding->name
@@ -548,5 +586,28 @@ Reflection generateSpirvReflection(Shader::ShaderType shaderType,
             break;
         }
     }
-    return Reflection(std::move(builder));
+    return builder;
+}
+
+Reflection generateSpirvReflection(Shader::ShaderType shaderType,
+    const Reflection &spirvReflection, ID3D12ShaderReflection *reflection)
+{
+    return Reflection(
+        generateReflectionBuilder(shaderType, spirvReflection, reflection));
+}
+
+Reflection generateLibraryReflection(Shader::ShaderType shaderType,
+    ID3D12LibraryReflection *reflection)
+{
+    auto desc = D3D12_LIBRARY_DESC{ };
+    if (!reflection || FAILED(reflection->GetDesc(&desc))
+        || desc.FunctionCount != 1)
+        return { };
+
+    const auto function = reflection->GetFunctionByIndex(0);
+    if (!function)
+        return { };
+
+    return Reflection(
+        generateReflectionBuilder(shaderType, Reflection{ }, function));
 }
